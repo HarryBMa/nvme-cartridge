@@ -1,5 +1,6 @@
 # PC Cartridge System Monitor
 # Watches for inserted drives and launches trusted launch.ps1 cartridges.
+# Also handles safe auto-close when a cartridge is removed (EventType 3).
 
 $InstallFolder = Join-Path $env:LOCALAPPDATA "PC-Cartridge-System"
 
@@ -24,7 +25,11 @@ if (-not (Test-Path $ConfigFile)) {
 }
 
 
+# Maps drive letter -> last event time (debounce)
 $LastLaunches = @{}
+
+# Maps drive letter -> PID of the launched cartridge process (for auto-close on removal)
+$LaunchedPIDs = @{}
 
 
 function Write-Log {
@@ -97,20 +102,61 @@ $null = Register-WmiEvent `
     -SourceIdentifier "PCCartridgeSystem" `
     -Action {
 
+        # Inline log helper — uses MessageData.LogFile to avoid cross-runspace scope issues
+        function Write-ActionLog {
+            param([string]$Message)
+            $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            Add-Content -Path $Event.MessageData.LogFile -Value "[$ts] $Message"
+        }
 
         $eventType = $Event.SourceEventArgs.NewEvent.EventType
 
+        $drive = $Event.SourceEventArgs.NewEvent.DriveName
 
-        # 2 = drive inserted
-        if ($eventType -ne 2) {
+        if ([string]::IsNullOrWhiteSpace($drive)) {
             return
         }
 
 
-        $drive = $Event.SourceEventArgs.NewEvent.DriveName
+        # ---- 3 = drive removed ----
+        if ($eventType -eq 3) {
+
+            Write-ActionLog "Cartridge removed: $drive"
+
+            # Stop the process that was launched for this drive, if any
+            $pidTable = $Event.MessageData.PIDs
+
+            if ($pidTable.ContainsKey($drive)) {
+
+                $cartPid = $pidTable[$drive]
+                $pidTable.Remove($drive)
+
+                try {
+
+                    $proc = Get-Process -Id $cartPid -ErrorAction SilentlyContinue
+
+                    if ($null -ne $proc) {
+                        $proc.CloseMainWindow() | Out-Null
+                        Start-Sleep -Seconds 2
+                        if (-not $proc.HasExited) {
+                            Stop-Process -Id $cartPid -Force -ErrorAction SilentlyContinue
+                        }
+                        Write-ActionLog "Closed cartridge process PID $cartPid for $drive"
+                    }
+
+                }
+                catch {
+                    Write-ActionLog "Could not stop process PID $cartPid : $($_.Exception.Message)"
+                }
+
+            }
+
+            return
+        }
 
 
-        if ([string]::IsNullOrWhiteSpace($drive)) {
+        # ---- 2 = drive inserted ----
+        if ($eventType -ne 2) {
             return
         }
 
@@ -125,32 +171,38 @@ $null = Register-WmiEvent `
 
         # Debounce
         $now = Get-Date
+        $debounce = $Event.MessageData.Debounce
+        $launches = $Event.MessageData.Launches
 
 
-        if ($LastLaunches.ContainsKey($drive)) {
+        if ($launches.ContainsKey($drive)) {
 
-            $elapsed = ($now - $LastLaunches[$drive]).TotalSeconds
+            $elapsed = ($now - $launches[$drive]).TotalSeconds
 
-            if ($elapsed -lt $DebounceSeconds) {
+            if ($elapsed -lt $debounce) {
 
-                Write-Log "Ignoring duplicate event for $drive"
+                Write-ActionLog "Ignoring duplicate event for $drive"
 
                 return
             }
         }
 
 
-        $LastLaunches[$drive] = $now
+        $launches[$drive] = $now
 
 
-        Write-Log "Cartridge detected: $drive"
+        Write-ActionLog "Cartridge detected: $drive"
 
-        $Mode = Get-Mode
+        # Read mode from config file
+        $configPath = $Event.MessageData.ConfigFile
+        $modeLine = Get-Content $configPath -ErrorAction SilentlyContinue |
+            Where-Object { $_ -like "MODE=*" }
+        $mode = if ($modeLine) { $modeLine.Split("=")[1].ToLower() } else { "stopped" }
 
 
-        if ($Mode -ne "running") {
+        if ($mode -ne "running") {
 
-            Write-Log "Cartridge execution disabled. Current mode: $Mode"
+            Write-ActionLog "Cartridge execution disabled. Current mode: $mode"
 
             return
         }
@@ -158,24 +210,25 @@ $null = Register-WmiEvent `
 
         try {
 
-            $hash = Get-FileHashSHA256 $launcher
+            $hash = (Get-FileHash -Path $launcher -Algorithm SHA256).Hash.ToLower()
 
+            Write-ActionLog "SHA256: $hash"
 
-            Write-Log "SHA256: $hash"
+            $trustFile = $Event.MessageData.TrustFile
+            $trusted = (Get-Content $trustFile -ErrorAction SilentlyContinue) -contains $hash
 
+            if (-not $trusted) {
 
-            if (-not (Is-TrustedScript $hash)) {
+                Write-ActionLog "Blocked untrusted cartridge."
 
-                Write-Log "Blocked untrusted cartridge."
-
-                    return
+                return
             }
 
 
-            Write-Log "Trusted cartridge."
+            Write-ActionLog "Trusted cartridge."
 
 
-            Start-Process `
+            $proc = Start-Process `
                 -FilePath "powershell.exe" `
                 -ArgumentList @(
                     "-NoProfile",
@@ -183,21 +236,33 @@ $null = Register-WmiEvent `
                     "-WindowStyle", "Hidden",
                     "-File", "`"$launcher`""
                 ) `
-                -WindowStyle Hidden
+                -WindowStyle Hidden `
+                -PassThru
 
 
-            Write-Log "Launched: $launcher"
+            # Store PID so we can close the process on removal
+            $Event.MessageData.PIDs[$drive] = $proc.Id
+
+            Write-ActionLog "Launched: $launcher (PID $($proc.Id))"
 
         }
 
         catch {
 
-            Write-Log "Failed launching $launcher"
-            Write-Log $_.Exception.Message
+            Write-ActionLog "Failed launching $launcher"
+            Write-ActionLog $_.Exception.Message
 
         }
 
-    }
+    } `
+    -MessageData ([PSCustomObject]@{
+        LogFile    = $LogFile
+        PIDs       = $LaunchedPIDs
+        Launches   = $LastLaunches
+        Debounce   = $DebounceSeconds
+        ConfigFile = $ConfigFile
+        TrustFile  = $TrustFile
+    })
 
 
 Write-Log "Event watcher registered."

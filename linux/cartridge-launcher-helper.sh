@@ -102,9 +102,28 @@ if grep -qx "$SCRIPT_HASH" "$TRUST_FILE"; then
     chmod +x "$SCRIPT"
     bash "$SCRIPT"
 
+# After the launch script exits, safely unmount and power off the drive
+echo "Launch script finished. Ejecting cartridge /dev/$DEVICE ..."
+
+# Unmount all partitions belonging to the parent device
+PARENT_DEVICE=$(lsblk -no PKNAME "/dev/$DEVICE" 2>/dev/null || echo "$DEVICE")
+
+for PART in $(lsblk -ln -o NAME "/dev/$PARENT_DEVICE" 2>/dev/null | tail -n +2); do
+    PART_MOUNT=$(findmnt -n -o TARGET "/dev/$PART" 2>/dev/null || true)
+    if [ -n "$PART_MOUNT" ]; then
+        echo "Unmounting /dev/$PART ..."
+        udisksctl unmount -b "/dev/$PART" --no-user-interaction 2>/dev/null || true
+    fi
+done
+
+# Power off the parent drive so it can be safely removed
+udisksctl power-off -b "/dev/$PARENT_DEVICE" --no-user-interaction 2>/dev/null || true
+
+echo "Cartridge ejected safely."
+
 else
 
-    echo "Script is NOT trusted."
-    echo "Cartridge blocked."
+echo "Script is NOT trusted."
+echo "Cartridge blocked."
 
 fi

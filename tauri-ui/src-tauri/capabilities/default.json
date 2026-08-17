@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schemas.tauri.app/config/v2/capability.json",
+  "identifier": "default",
+  "description": "Default capability for PC Cartridge Launcher",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-close",
+    "core:window:allow-show",
+    "core:window:allow-hide"
+  ]
+}

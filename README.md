@@ -166,3 +166,110 @@ SSD<br>
 └── launch.ps1<br>
 └── SteamLibrary<br>
 The content of `launch.ps1` decide what happens next.
+
+---
+
+## Tauri UI
+
+A ready-to-build graphical popup is included in `tauri-ui/`.  It shows cover
+art, the game title, and **Play** / **Eject** buttons in a compact frameless
+window.  See [`tauri-ui/README.md`](tauri-ui/README.md) for build instructions.
+
+---
+
+## Advanced Features
+
+### cartridge.conf — URI and executable launcher
+
+Instead of hard-coding the game command in `launch.ps1` / `launch.sh`, you can place a
+`cartridge.conf` file at the root of the cartridge and use the URI-aware template scripts
+from `example-scripts/Windows/URI-Launch/` or `example-scripts/Linux/URI-Launch/`.
+
+`cartridge.conf` format (plain text):
+
+```
+executable=steam://rungameid/1091500
+title=My Game
+cover=cover.png
+```
+
+The `executable` value can be:
+- A **URI** for any protocol handler registered on the OS (`steam://`, `heroic://`, `gog://`, `epic://`, `lutris://`, etc.)
+- A **relative path** to a file on the cartridge (e.g. `Game\bin\game.exe` on Windows or `Game/bin/start.sh` on Linux)
+
+A full annotated example is at `example-scripts/cartridge.conf.example`.
+
+#### How URI detection works
+
+**Windows (`launch.ps1`):** if `executable` starts with a known scheme, `Start-Process` is
+called with the URI string directly — Windows ShellExecute routes it to the registered
+protocol handler automatically.
+
+**Linux (`launch.sh`):** if `executable` starts with a known scheme, `xdg-open` is called —
+it routes the URI to the default handler registered with the desktop environment.
+
+---
+
+### Safe Eject
+
+#### Windows
+
+Use menu option **4) Eject cartridge** in `cartridge-windows.ps1` to safely flush the write
+cache and dismount a drive before pulling it out.
+
+Alternatively run `windows\eject.ps1` directly:
+
+```powershell
+.\windows\eject.ps1 -DriveLetter D
+```
+
+The script first tries `Win32_Volume.Dismount()` and falls back to `mountvol /P` if that
+fails.
+
+#### Linux
+
+After a cartridge's `launch.sh` script exits, the launcher helper automatically unmounts
+and powers off the drive via `udisksctl`.
+
+For manual ejection, use the installed helper:
+
+```bash
+pc-cartridge-eject sdb
+```
+
+Or run the script directly:
+
+```bash
+sudo linux/eject.sh sdb
+```
+
+---
+
+### Auto-close on cartridge removal
+
+#### Windows
+
+When a drive is physically removed (or ejected), the cartridge monitor (`cartridge-monitoring.ps1`)
+detects the `DeviceRemoved` event and terminates the process that was launched for that
+drive. The process receives `CloseMainWindow()` first (allowing a graceful shutdown) and
+`Stop-Process -Force` after a 2-second timeout if it has not yet exited.
+
+#### Linux
+
+The `BindsTo=dev-%i.device` directive in `game-cartridge@.service` means systemd
+automatically stops the service when the device disappears. In addition, the udev
+`ACTION=="remove"` rule fires `game-cartridge-remove@.service`, which sends `SIGTERM`
+(and then `SIGKILL` if needed) to any running `launch.sh` processes.
+
+---
+
+### Tauri frontends — loading images from the cartridge drive
+
+Tauri's default security policy blocks access to files outside the app bundle. Two
+patterns for displaying cartridge images (e.g. cover art) are documented and demonstrated
+in `example-scripts/Tauri-Frontend/tauri-asset-loading.md`:
+
+- **Pattern A** — enable `assetProtocol` in `tauri.conf.json` (`security.assetProtocol.scope`) and use
+  `convertFileSrc()` in the frontend.
+- **Pattern B** — read image bytes in a Rust `#[tauri::command]` and return a base64
+  data URI (no `tauri.conf.json` change required; works with any dynamic drive letter).

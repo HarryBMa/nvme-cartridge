@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PC Cartridge</title>
+  <link rel="stylesheet" href="src/style.css" />
+</head>
+<body>
+  <!-- Drag region — lets the user reposition the frameless window -->
+  <div id="titlebar" data-tauri-drag-region>
+    <span id="app-title" data-tauri-drag-region>PC CARTRIDGE</span>
+    <button id="btn-close" title="Close">✕</button>
+  </div>
+
+  <!-- Cover art -->
+  <div id="cover-wrapper">
+    <img id="cover-img" src="" alt="Game cover" />
+    <div id="cover-placeholder">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="1.2" stroke-linecap="round"
+           stroke-linejoin="round" width="64" height="64">
+        <rect x="2" y="3" width="20" height="14" rx="2"/>
+        <path d="M8 21h8M12 17v4"/>
+        <circle cx="12" cy="10" r="3"/>
+      </svg>
+      <p>No cover art</p>
+    </div>
+  </div>
+
+  <!-- Game info -->
+  <div id="info-panel">
+    <h1 id="game-title">Loading…</h1>
+    <p id="game-executable"></p>
+  </div>
+
+  <!-- Status message -->
+  <div id="status-bar">
+    <span id="status-text">Initialising…</span>
+  </div>
+
+  <!-- Action buttons -->
+  <div id="button-row">
+    <button id="btn-play" class="btn btn-primary" disabled>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+           width="18" height="18"><path d="M8 5v14l11-7z"/></svg>
+      Play
+    </button>
+    <button id="btn-eject" class="btn btn-secondary" disabled>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2" stroke-linecap="round"
+           stroke-linejoin="round" width="18" height="18">
+        <polygon points="12 2 19 9 5 9"/>
+        <line x1="5" y1="22" x2="19" y2="22"/>
+        <line x1="12" y1="9" x2="12" y2="18"/>
+      </svg>
+      Eject
+    </button>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

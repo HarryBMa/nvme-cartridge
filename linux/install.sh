@@ -13,7 +13,9 @@ echo "Installing PC Cartridge System..."
 
 for FILE in \
     "linux/cartridge-launcher-helper.sh" \
+    "linux/cartridge-remove-helper.sh" \
     "linux/game-cartridge@.service" \
+    "linux/game-cartridge-remove@.service" \
     "linux/99-game-cartridge.rules"
 do
     if [ ! -f "$FILE" ]; then
@@ -45,6 +47,7 @@ echo "Home directory: $USER_HOME"
 echo "Installing launcher helper..."
 
 install -m 755 linux/cartridge-launcher-helper.sh /usr/local/bin/pc-cartridge-system-helper
+install -m 755 linux/eject.sh /usr/local/bin/pc-cartridge-eject
 
 
 ########################################
@@ -56,6 +59,19 @@ echo "Installing systemd service..."
 sed "s/__USERNAME__/$USERNAME/g" \
     "linux/game-cartridge@.service" \
     > /etc/systemd/system/game-cartridge@.service
+
+sed "s/__USERNAME__/$USERNAME/g" \
+    "linux/game-cartridge-remove@.service" \
+    > /etc/systemd/system/game-cartridge-remove@.service
+
+
+########################################
+# Install removal helper
+########################################
+
+echo "Installing removal helper..."
+
+install -m 755 linux/cartridge-remove-helper.sh /usr/local/bin/pc-cartridge-system-remove
 
 
 ########################################

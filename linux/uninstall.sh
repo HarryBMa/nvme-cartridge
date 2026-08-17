@@ -21,6 +21,7 @@ fi
 echo "Stopping cartridge services..."
 
 systemctl stop 'game-cartridge@*' 2>/dev/null || true
+systemctl stop 'game-cartridge-remove@*' 2>/dev/null || true
 
 
 ########################################
@@ -31,6 +32,8 @@ echo "Removing launcher helper..."
 
 rm -f /usr/local/bin/cartridge-launcher-helper
 rm -f /usr/local/bin/pc-cartridge-system-helper
+rm -f /usr/local/bin/pc-cartridge-system-remove
+rm -f /usr/local/bin/pc-cartridge-eject
 
 
 ########################################
@@ -40,6 +43,7 @@ rm -f /usr/local/bin/pc-cartridge-system-helper
 echo "Removing systemd service..."
 
 rm -f /etc/systemd/system/game-cartridge@.service
+rm -f /etc/systemd/system/game-cartridge-remove@.service
 
 
 ########################################
