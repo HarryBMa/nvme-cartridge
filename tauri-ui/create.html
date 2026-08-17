@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Create cartridge</title>
+  <link rel="stylesheet" href="src/create.css" />
+</head>
+<body>
+  <main id="shell">
+    <header id="bar" data-tauri-drag-region>
+      <p class="eyebrow" data-tauri-drag-region>Create cartridge</p>
+      <button id="btn-close" class="icon-btn" type="button" aria-label="Close" title="Close — Esc">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"
+             stroke-linecap="round" width="16" height="16">
+          <path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6" />
+        </svg>
+      </button>
+    </header>
+
+    <div id="columns">
+      <!-- Step 1 ------------------------------------------------------- -->
+      <section id="pick-game" aria-labelledby="step-game">
+        <h2 class="step" id="step-game"><span class="step__n">1</span> Choose a game</h2>
+
+        <input id="search" type="search" placeholder="Search your library…"
+               autocomplete="off" spellcheck="false" aria-label="Search games" />
+
+        <div id="games-wrap">
+          <ul id="games" aria-label="Installed games"></ul>
+          <p id="games-empty" hidden></p>
+        </div>
+
+        <button id="btn-custom" class="link" type="button">
+          Not in Steam? Enter it by hand
+        </button>
+      </section>
+
+      <!-- Step 2 + 3 --------------------------------------------------- -->
+      <section id="pick-target" aria-labelledby="step-drive">
+        <div id="preview">
+          <div id="preview-art">
+            <img id="preview-img" alt="" />
+            <div id="preview-empty" aria-hidden="true"><span>NO&nbsp;ART</span></div>
+          </div>
+          <div id="preview-meta">
+            <p class="eyebrow">Selected</p>
+            <h3 id="preview-title">Nothing yet</h3>
+            <p id="preview-sub" class="mono"></p>
+          </div>
+        </div>
+
+        <!-- Manual entry, shown on demand -->
+        <div id="custom" hidden>
+          <label class="field">
+            <span class="field__label">Title</span>
+            <input id="custom-title" type="text" placeholder="My Game" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span class="field__label">Play should start</span>
+            <input id="custom-exec" type="text" placeholder="steam://rungameid/367520"
+                   autocomplete="off" spellcheck="false" />
+          </label>
+          <p class="field__hint">
+            A <code>steam://</code>, <code>heroic://</code>, <code>gog://</code>,
+            <code>epic://</code>, <code>lutris://</code> or <code>https://</code> link,
+            or a path to a file on the cartridge.
+          </p>
+        </div>
+
+        <h2 class="step" id="step-drive"><span class="step__n">2</span> Choose the cartridge</h2>
+
+        <div id="drives-wrap">
+          <ul id="drives" aria-label="Target drives"></ul>
+          <p id="drives-empty" hidden></p>
+        </div>
+
+        <footer id="actions">
+          <button id="btn-create" class="btn btn--primary" type="button" disabled>
+            <span class="btn__label">Write cartridge</span>
+          </button>
+          <button id="btn-rescan" class="btn btn--ghost" type="button">
+            <span class="btn__label">Rescan</span>
+          </button>
+        </footer>
+
+        <p id="status" role="status" aria-live="polite"></p>
+      </section>
+    </div>
+  </main>
+
+  <script type="module" src="src/create.js"></script>
+</body>
+</html>

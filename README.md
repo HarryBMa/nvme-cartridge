@@ -29,6 +29,10 @@ launcher opens with the cover art
 Nothing on the cartridge is executed automatically. The launcher shows you what
 it found and waits — pressing Play is the gate.
 
+The same binary runs the wizard that makes cartridges, with `--create`. Only one
+window is ever built, so neither mode costs anything while you are using the
+other.
+
 ### Idle cost
 
 The point is that this costs nothing while you are not using it.
@@ -98,7 +102,27 @@ registers a logon task to start the watcher.
 
 ## Making a cartridge
 
-Copy `cartridge.conf.example` to the root of the drive as `cartridge.conf`:
+Run the installer menu and choose **Create a cartridge**, or start it directly:
+
+```bash
+pc-cartridge-launcher --create
+```
+
+<img width="700" alt="The create-cartridge wizard: a searchable list of installed Steam games on the left, cover preview and drive picker on the right" src="docs/wizard.png" />
+
+It reads your installed Steam games from Steam's own `appmanifest` files and
+takes the cover art from Steam's local cache, so it works with no network. Pick a
+game, pick the drive, press Write. Games not in Steam can be entered by hand with
+any supported URI.
+
+The wizard only ever writes two files, `cartridge.conf` and `cover.jpg`, and only
+to a removable drive — it re-checks the target itself rather than trusting the
+window, so it cannot be pointed at your system disk.
+
+### By hand
+
+A cartridge is just a text file, so you can skip the wizard. Copy
+`cartridge.conf.example` to the root of the drive as `cartridge.conf`:
 
 ```ini
 executable=steam://rungameid/1091500
@@ -158,7 +182,10 @@ cartridge.conf.example      the one file a cartridge needs
 linux/                      udev rule, systemd units, mount + eject helpers
 windows/                    install / uninstall / eject scripts
 watcher/                    resident volume watcher (Windows only, Rust)
-tauri-ui/                   the launcher popup (Tauri 2 + Rust, no framework)
+tauri-ui/                   one binary, two windows (Tauri 2 + Rust, no framework)
+  index.html                the launcher popup
+  create.html               the create-cartridge wizard
+  src/tokens.css            palette and type shared by both
 docs/                       screenshots
 ```
 

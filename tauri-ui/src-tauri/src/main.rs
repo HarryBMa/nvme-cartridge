@@ -1,9 +1,24 @@
 // PC Cartridge Launcher — Tauri 2.0 backend
 //
-// Exposes three commands to the frontend:
+// One binary, two modes, chosen by the arguments it was started with:
+//
+//   pc-cartridge-launcher --drive <path>    the popup, opened on insert
+//   pc-cartridge-launcher --create          the create-cartridge wizard
+//
+// Exactly one window is built, so the wizard costs nothing when a cartridge is
+// inserted and the popup costs nothing while making one.
+//
+// Launcher commands:
+//   drive_path()                             -> String
 //   parse_cartridge(drive_path)              -> CartridgeInfo (cover included)
 //   launch_game(executable, drive_path)      -> ()
 //   eject_drive(drive_path)                  -> ()
+//
+// Wizard commands:
+//   list_steam_games()                       -> Vec<SteamGameInfo>
+//   steam_cover(app_id)                      -> String (data URI)
+//   list_target_drives()                     -> Vec<TargetDrive>
+//   create_cartridge(request)                -> CartridgeResult
 //
 // There is deliberately no command that takes a path to read. An earlier
 // read_image_as_data_uri(path) let the webview turn any file on the system into
@@ -12,10 +27,15 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod create;
+mod drives;
+mod steam;
+
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 // --------------------------------------------------------------------------
 // Data types
@@ -295,7 +315,7 @@ fn drive_from_args<I: Iterator<Item = String>>(args: I) -> String {
 }
 
 /// Minimal base64 encoder — avoids adding a `base64` crate dependency.
-fn base64_encode(input: &[u8]) -> String {
+pub(crate) fn base64_encode(input: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
     for chunk in input.chunks(3) {
@@ -552,14 +572,78 @@ fn get_parent_device(partition: &str) -> String {
 // Entry point
 // --------------------------------------------------------------------------
 
+// --------------------------------------------------------------------------
+// Wizard commands
+// --------------------------------------------------------------------------
+
+#[tauri::command]
+fn list_steam_games() -> Result<Vec<create::SteamGameInfo>, String> {
+    create::steam_games()
+}
+
+#[tauri::command]
+fn steam_cover(app_id: String) -> String {
+    create::steam_cover(&app_id)
+}
+
+#[tauri::command]
+fn list_target_drives() -> Vec<drives::TargetDrive> {
+    create::target_drives()
+}
+
+#[tauri::command]
+fn create_cartridge(
+    request: create::CartridgeRequest,
+) -> Result<create::CartridgeResult, String> {
+    create::create_cartridge(&request)
+}
+
+// --------------------------------------------------------------------------
+// Entry point
+// --------------------------------------------------------------------------
+
 fn main() {
+    // Both windows start hidden; the frontend shows itself once it has drawn,
+    // so the user never sees an empty frame.
+    let wizard = std::env::args().skip(1).any(|arg| arg == "--create");
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             drive_path,
             parse_cartridge,
             launch_game,
             eject_drive,
+            list_steam_games,
+            steam_cover,
+            list_target_drives,
+            create_cartridge,
         ])
+        .setup(move |app| {
+            if wizard {
+                WebviewWindowBuilder::new(app, "create", WebviewUrl::App("create.html".into()))
+                    .title("Create cartridge")
+                    .inner_size(820.0, 600.0)
+                    .resizable(false)
+                    .decorations(false)
+                    .transparent(true)
+                    .center()
+                    .visible(false)
+                    .build()?;
+            } else {
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                    .title("PC Cartridge")
+                    .inner_size(420.0, 560.0)
+                    .resizable(false)
+                    .decorations(false)
+                    .transparent(true)
+                    // The popup has to land on top of whatever is running.
+                    .always_on_top(true)
+                    .center()
+                    .visible(false)
+                    .build()?;
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
 }

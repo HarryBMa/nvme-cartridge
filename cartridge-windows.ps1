@@ -22,9 +22,10 @@ function Show-Menu {
     Write-Host ""
     Write-Host "        ╭────────────────────────────────╮"
     Write-Host "        │   1) Install                   │"
-    Write-Host "        │   2) Eject cartridge           │"
-    Write-Host "        │   3) Uninstall                 │"
-    Write-Host "        │   4) Exit                      │"
+    Write-Host "        │   2) Create a cartridge        │"
+    Write-Host "        │   3) Eject cartridge           │"
+    Write-Host "        │   4) Uninstall                 │"
+    Write-Host "        │   5) Exit                      │"
     Write-Host "        ╰────────────────────────────────╯"
     Write-Host ""
 }
@@ -46,12 +47,37 @@ while ($true) {
 
         "2" {
             Clear-Host
+
+            # Prefer a local build so the wizard works before installing.
+            $Built = Join-Path $ScriptDir "tauri-ui\src-tauri\target\release\pc-cartridge-launcher.exe"
+            $Installed = Join-Path $env:LOCALAPPDATA "PC-Cartridge-System\pc-cartridge-launcher.exe"
+
+            $Launcher = if (Test-Path $Built) { $Built } elseif (Test-Path $Installed) { $Installed } else { $null }
+
+            if ($null -eq $Launcher) {
+                Write-Host "The launcher has not been built yet:" -ForegroundColor Yellow
+                Write-Host ""
+                Write-Host "  cd tauri-ui"
+                Write-Host "  npm install"
+                Write-Host "  npm run build"
+                Write-Host ""
+                PAUSE
+            }
+            else {
+                Write-Host "Opening the cartridge wizard..."
+                Start-Process -FilePath $Launcher -ArgumentList "--create" -Wait
+                Clear-Host
+            }
+        }
+
+        "3" {
+            Clear-Host
             Write-Host "Eject cartridge..."
             & "$ScriptDir\windows\eject.ps1"
             Clear-Host
         }
 
-        "3" {
+        "4" {
             Clear-Host
             Write-Host "Starting uninstall..."
             Start-Process `
@@ -61,7 +87,7 @@ while ($true) {
                 -Wait
         }
 
-        "4" {
+        "5" {
             Clear-Host
             exit
         }

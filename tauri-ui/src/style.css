@@ -1,68 +1,9 @@
 /* ==========================================================================
-   PC Cartridge Launcher
-   --------------------------------------------------------------------------
-   The window is the cover art. A cartridge is a physical object you just
-   pushed into a dock, so the moment it appears should be about the artwork —
-   not about a form. Only three things sit on top of it: what it is, Play, and
-   Eject. Anything the machine knows beyond that lives behind the gear.
-
-   Neutrals are tinted warm (hue 65) rather than pure black, and the single
-   accent is sampled from the cover art at runtime so the chrome belongs to
-   whatever game is in the dock.
+   The launcher popup: the cover art fills the window, with the title and the
+   two actions over it. Shared palette, type and buttons live in tokens.css.
    ========================================================================== */
 
-@font-face {
-  font-family: "Archivo";
-  src: url("fonts/archivo-latin-var.woff2") format("woff2-variations");
-  font-weight: 400 800;
-  font-stretch: 62% 125%;
-  font-display: block;
-}
-
-@font-face {
-  font-family: "Spline Sans Mono";
-  src: url("fonts/spline-sans-mono-latin.woff2") format("woff2");
-  font-weight: 400 600;
-  font-display: block;
-}
-
-:root {
-  --shell: oklch(0.155 0.005 65);
-  --ink: oklch(0.97 0.006 75);
-  --ink-2: oklch(0.75 0.008 75);
-  --ink-3: oklch(0.56 0.008 75);
-  --hairline: oklch(1 0 0 / 0.16);
-
-  /* Replaced from the artwork on load. */
-  --accent: oklch(0.72 0.15 68);
-  --accent-ink: oklch(0.16 0.02 65);
-  --danger: oklch(0.68 0.19 27);
-
-  --radius: 16px;
-  --ease: cubic-bezier(0.16, 1, 0.3, 1); /* ease-out-quint */
-}
-
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
-
-html,
-body {
-  height: 100%;
-  margin: 0;
-}
-
-body {
-  background: transparent; /* the window itself is transparent */
-  font-family: "Archivo", ui-sans-serif, sans-serif;
-  color: var(--ink);
-  -webkit-font-smoothing: antialiased;
-  overflow: hidden;
-  cursor: default;
-  user-select: none;
-}
+@import "tokens.css";
 
 /* ==========================================================================
    Card
@@ -263,31 +204,6 @@ body {
   gap: 4px;
 }
 
-.icon-btn {
-  appearance: none;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 0;
-  border-radius: 5px;
-  background: oklch(0.14 0.004 65 / 0.5);
-  color: var(--ink-2);
-  cursor: pointer;
-  transition: background-color 130ms linear, color 130ms linear;
-}
-
-.icon-btn:hover {
-  background: oklch(0.14 0.004 65 / 0.82);
-  color: var(--ink);
-}
-
-.icon-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
 #btn-details[aria-expanded="true"] {
   background: var(--accent);
   color: var(--accent-ink);
@@ -339,48 +255,6 @@ body {
   gap: 9px;
   margin-top: 18px;
   animation: rise 520ms 380ms var(--ease) both;
-}
-
-.btn {
-  appearance: none;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  font-stretch: 106%;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  height: 46px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  border-radius: 5px;
-  cursor: pointer;
-  transition:
-    transform 130ms var(--ease),
-    background-color 130ms linear,
-    border-color 130ms linear,
-    color 130ms linear;
-}
-
-.btn:active {
-  transform: translateY(1px);
-}
-
-.btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.btn__key {
-  font-family: "Spline Sans Mono", ui-monospace, monospace;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0;
-  line-height: 1;
-  padding: 3px 4px 2px;
-  border-radius: 2px;
-  opacity: 0.72;
 }
 
 /* Primary: the only filled surface in the window. */
@@ -547,17 +421,6 @@ body {
 /* ==========================================================================
    Shared
    ========================================================================== */
-
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-}
-
-@keyframes fade {
-  from { opacity: 0; }
-}
 
 @media (prefers-reduced-motion: reduce) {
   *,

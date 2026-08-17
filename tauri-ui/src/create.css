@@ -1,0 +1,381 @@
+/* ==========================================================================
+   Create-cartridge wizard.
+
+   Numbered steps, but one screen: there are only two decisions, and hiding the
+   second behind a Next button would make a short job feel long. The palette and
+   the buttons come from tokens.css, so this reads as the same product as the
+   popup it makes cartridges for.
+   ========================================================================== */
+
+@import "tokens.css";
+
+#shell {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: linear-gradient(200deg, var(--panel) 0%, var(--shell) 100%);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.07),
+    inset 0 0 0 1px oklch(1 0 0 / 0.05),
+    0 20px 44px -14px oklch(0 0 0 / 0.7);
+  animation: shell-in 460ms var(--ease) both;
+}
+
+@keyframes shell-in {
+  from {
+    opacity: 0;
+    transform: scale(0.99) translateY(8px);
+  }
+}
+
+#bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 14px 14px 20px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+#columns {
+  display: grid;
+  /* The library list is the wider job; the right column is decisions. */
+  grid-template-columns: 1fr 340px;
+  min-height: 0;
+}
+
+#pick-game,
+#pick-target {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 18px 20px 20px;
+}
+
+#pick-target {
+  border-left: 1px solid var(--hairline-soft);
+  background: oklch(0 0 0 / 0.14);
+}
+
+/* --- Step headings ------------------------------------------------------ */
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 12px;
+  font-size: 10px;
+  font-weight: 700;
+  font-stretch: 108%;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.step__n {
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--accent) 22%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent) 45%, transparent);
+  color: color-mix(in oklch, var(--accent) 90%, var(--ink));
+  font-size: 9.5px;
+  letter-spacing: 0;
+}
+
+/* --- Search ------------------------------------------------------------- */
+
+#search,
+.field input {
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--sunk);
+  border: 1px solid var(--hairline-soft);
+  border-radius: 5px;
+  padding: 9px 11px;
+  width: 100%;
+  transition: border-color 130ms linear;
+}
+
+#search::placeholder,
+.field input::placeholder {
+  color: var(--ink-3);
+}
+
+#search:focus,
+.field input:focus {
+  outline: none;
+  border-color: color-mix(in oklch, var(--accent) 60%, transparent);
+}
+
+#search {
+  margin-bottom: 12px;
+}
+
+/* --- Lists -------------------------------------------------------------- */
+
+#games-wrap,
+#drives-wrap {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 6px;
+  background: oklch(0 0 0 / 0.22);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+#drives-wrap {
+  flex: none;
+  max-height: 132px;
+  margin-bottom: 16px;
+}
+
+#games,
+#drives {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--hairline-soft);
+  background: none;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 110ms linear;
+}
+
+li:last-child .row {
+  border-bottom: 0;
+}
+
+.row:hover {
+  background: oklch(1 0 0 / 0.035);
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Selection is marked with a colour bar rather than a fill, so the row text
+   keeps its contrast. */
+.row[aria-selected="true"] {
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.row__name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row__meta {
+  flex: none;
+  font-family: "Spline Sans Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+
+/* A drive that already holds a cartridge: not an error, but worth saying. */
+.row__warn {
+  color: color-mix(in oklch, var(--accent) 80%, var(--ink));
+}
+
+#games-empty,
+#drives-empty {
+  margin: 0;
+  padding: 16px 14px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-3);
+}
+
+.link {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 8px 0 0;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: var(--hairline);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.link:hover {
+  color: var(--ink);
+  text-decoration-color: currentColor;
+}
+
+/* --- Preview ------------------------------------------------------------ */
+
+#preview {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+#preview-art {
+  position: relative;
+  /* 2:3 — the shape Steam caches library art in. */
+  aspect-ratio: 2 / 3;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--sunk);
+  box-shadow:
+    inset 0 0 0 1px oklch(0 0 0 / 0.6),
+    0 6px 16px -8px oklch(0 0 0 / 0.75);
+}
+
+#preview-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+#preview-img:not([src]),
+#preview-img[src=""] {
+  display: none;
+}
+
+#preview-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: repeating-linear-gradient(
+    135deg,
+    oklch(0.185 0.005 65) 0 7px,
+    oklch(0.16 0.005 65) 7px 14px
+  );
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: var(--ink-3);
+}
+
+#preview-art.has-art #preview-empty {
+  display: none;
+}
+
+#preview-meta {
+  min-width: 0;
+  align-self: center;
+}
+
+#preview-title {
+  margin: 7px 0 0;
+  font-size: 19px;
+  font-weight: 800;
+  font-stretch: 108%;
+  line-height: 1.05;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+#preview-sub {
+  margin: 7px 0 0;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
+/* --- Manual entry ------------------------------------------------------- */
+
+#custom {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
+  animation: rise 380ms var(--ease) both;
+}
+
+/* `display` on an id selector beats the browser's [hidden] rule, so hiding has
+   to be stated explicitly or the manual fields show through. */
+#custom[hidden] {
+  display: none;
+}
+
+.field {
+  display: block;
+}
+
+.field__label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.field__hint {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--ink-3);
+}
+
+.field__hint code {
+  font-family: "Spline Sans Mono", ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--ink-2);
+}
+
+/* --- Actions ------------------------------------------------------------ */
+
+#actions {
+  display: flex;
+  gap: 9px;
+  /* Anchored to the bottom of the column rather than left floating under the
+     drive list, so the primary action sits where one is looked for. */
+  margin-top: auto;
+}
+
+#btn-create {
+  flex: 1;
+}
+
+#status {
+  margin: 12px 0 0;
+  min-height: 1.4em;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+#status.is-error {
+  color: color-mix(in oklch, var(--danger) 78%, var(--ink));
+}
+
+#status.is-good {
+  color: color-mix(in oklch, var(--good) 72%, var(--ink));
+}

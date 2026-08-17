@@ -26,8 +26,9 @@ echo -e "${RESET}"
 
 echo "        ╭────────────────────────────────╮"
 echo "        │   1) Install                   │"
-echo "        │   2) Uninstall                 │"
-echo "        │   3) Exit                      │"
+echo "        │   2) Create a cartridge        │"
+echo "        │   3) Uninstall                 │"
+echo "        │   4) Exit                      │"
 echo "        ╰────────────────────────────────╯"
 echo ""
 
@@ -41,10 +42,28 @@ case "$OPTION" in
         ;;
     2)
         clear 2>/dev/null || printf "\033c"
+        LAUNCHER="/usr/local/bin/pc-cartridge-launcher"
+        # Prefer a local build so the wizard can be used before installing.
+        BUILT="$SCRIPT_DIR/tauri-ui/src-tauri/target/release/pc-cartridge-launcher"
+        [ -x "$BUILT" ] && LAUNCHER="$BUILT"
+
+        if [ ! -x "$LAUNCHER" ]; then
+            echo "The launcher has not been built yet:"
+            echo ""
+            echo "  cd tauri-ui && npm install && npm run build"
+            echo ""
+            read -rp "Press enter to continue..." _
+            exit 1
+        fi
+        echo "Opening the cartridge wizard..."
+        "$LAUNCHER" --create
+        ;;
+    3)
+        clear 2>/dev/null || printf "\033c"
         echo "Starting uninstall..."
         sudo bash "$SCRIPT_DIR/linux/uninstall.sh"
         ;;
-    3)
+    4)
         exit 0
         ;;
     *)

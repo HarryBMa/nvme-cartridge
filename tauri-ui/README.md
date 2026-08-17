@@ -72,6 +72,29 @@ npm run dev       # run it against a drive, for development
 There is no bundler: `index.html` and `src/` are shipped as-is, which is why
 `frontendDist` points at this directory.
 
+## The create-cartridge wizard
+
+The same binary, started with `--create`, opens the wizard that writes
+cartridges:
+
+```bash
+pc-cartridge-launcher --create
+```
+
+![The create-cartridge wizard](../docs/wizard.png)
+
+Only one window is ever built — `main()` looks at the arguments and constructs
+either the popup or the wizard, never both, so neither mode costs memory while
+the other is in use.
+
+The game list comes from Steam's own `appmanifest_*.acf` files across every
+library folder in `libraryfolders.vdf`, and the art from Steam's
+`appcache/librarycache`. Nothing is fetched. Games that are mid-download are
+skipped, since a cartridge pointing at a partial install cannot play.
+
+Covers are loaded one at a time as you select a game: base64ing a whole library
+into the webview at once would be tens of megabytes of IPC.
+
 ## How it gets started
 
 The launcher takes the cartridge's mount point on the command line and shows one
