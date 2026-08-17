@@ -98,27 +98,50 @@ udevadm trigger
 # Done
 ########################################
 
+########################################
+# Install the launcher binary if it has been built
+########################################
+
+LAUNCHER_BUILD="tauri-ui/src-tauri/target/release/pc-cartridge-launcher"
+
+if [ -f "$LAUNCHER_BUILD" ]; then
+    echo "Installing launcher..."
+    install -m 755 "$LAUNCHER_BUILD" /usr/local/bin/pc-cartridge-launcher
+    LAUNCHER_STATE="installed"
+else
+    LAUNCHER_STATE="not built yet"
+fi
+
+
+########################################
+# Done
+########################################
+
 echo ""
 echo "=========================================="
 echo " PC Cartridge System installed"
 echo "=========================================="
 echo ""
-echo " Create cartridges with:"
+echo " Launcher: $LAUNCHER_STATE"
+
+if [ "$LAUNCHER_STATE" != "installed" ]; then
+    echo ""
+    echo " Build it, then run this installer again:"
+    echo ""
+    echo "   cd tauri-ui && npm install && npm run build"
+fi
+
 echo ""
-echo "  launch.sh"
+echo " Put a cartridge.conf at the root of the drive:"
 echo ""
-echo " Example:"
+echo "   executable=steam://rungameid/12345"
+echo "   title=My Game"
+echo "   cover=cover.jpg"
 echo ""
-echo "  #!/bin/bash"
-echo "  steam steam://rungameid/12345"
+echo " Then plug the cartridge in. Nothing runs on its own:"
+echo " the launcher opens and waits for you to press Play."
 echo ""
-echo " The SSD must be automatically mounted by"
-echo " your desktop environment."
-echo ""
-echo " If your distro does not automount drives,"
-echo " configure automount manually or install"
-echo " a tool such as udiskie."
-echo ""
-echo " Create a 'launch.sh' script on the cartridge and trust it with 'trust-script-linux.sh'"
-echo " Then re-insert the cartridge to test."
+echo " The drive must be automounted by your desktop."
+echo " If your distro does not automount, install"
+echo " something like udiskie."
 echo ""

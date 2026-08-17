@@ -1,41 +1,60 @@
 #!/bin/bash
-# PC Cartridge System - Removal Helper
+#
 # Called by game-cartridge-remove@.service when a partition is unplugged.
-# Terminates any running launch.sh process that was started from the cartridge.
+#
+# Closes the launcher window if it was showing the cartridge that just left. It
+# does not touch the game: pulling a cartridge while the game is running is the
+# user's business, and killing their session would be a worse surprise than a
+# stale window.
+#
+# The old version pgrep'd for "launch.sh" and killed anything matching. Nothing
+# is called launch.sh any more, and matching on a name that loose could have hit
+# an unrelated process.
 
-set -e
+set -uo pipefail
 
-DEVICE="$1"
+DEVICE="${1:-}"
 
 if [ -z "$DEVICE" ]; then
-    echo "Usage: pc-cartridge-system-remove <device>"
-    exit 1
+    echo "usage: $0 <kernel device name, e.g. sdb1>" >&2
+    exit 2
 fi
 
-TRUST_DIR="$HOME/.config/pc-cartridge-system"
-LOG_FILE="$TRUST_DIR/helper_script.log"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/pc-cartridge-system"
+mkdir -p "$STATE_DIR"
+exec >>"$STATE_DIR/helper.log" 2>&1
 
-mkdir -p "$TRUST_DIR"
-exec >> "$LOG_FILE" 2>&1
+echo "==== $(date -Is) cartridge removed: $DEVICE ===="
 
-echo "==== Cartridge removed: $DEVICE ($(date)) ===="
+# Match only launcher processes, and only ones whose --drive argument is a mount
+# point that no longer exists. A second cartridge still plugged in keeps its own
+# window.
+CLOSED=0
 
-# Find and terminate any launch.sh processes started for this device.
-# The launch helper sets the process title / args to include the mount point.
-# We look for bash processes whose argv contains "launch.sh" and whose working
-# directory or open files are under the former mount point.
-PIDS=$(pgrep -f "launch.sh" 2>/dev/null || true)
+for PID in $(pgrep -x pc-cartridge-launcher 2>/dev/null || true); do
+    # argv is NUL-separated; --drive is followed by the mount point.
+    mapfile -d '' -t ARGS < "/proc/$PID/cmdline" 2>/dev/null || continue
 
-if [ -n "$PIDS" ]; then
-    echo "Sending SIGTERM to launch.sh processes: $PIDS"
-    echo "$PIDS" | xargs -r kill -SIGTERM 2>/dev/null || true
-    sleep 2
-    # Force-kill any survivors
-    REMAINING=$(pgrep -f "launch.sh" 2>/dev/null || true)
-    if [ -n "$REMAINING" ]; then
-        echo "Force-killing remaining processes: $REMAINING"
-        echo "$REMAINING" | xargs -r kill -SIGKILL 2>/dev/null || true
+    MOUNT=""
+    for i in "${!ARGS[@]}"; do
+        if [ "${ARGS[$i]}" = "--drive" ]; then
+            MOUNT="${ARGS[$((i + 1))]:-}"
+            break
+        fi
+    done
+
+    [ -z "$MOUNT" ] && continue
+
+    # Still mounted means this launcher belongs to a cartridge that is present.
+    if mountpoint -q "$MOUNT" 2>/dev/null; then
+        continue
     fi
-fi
 
-echo "Removal handler finished for $DEVICE"
+    echo "closing launcher $PID (was showing $MOUNT)"
+    kill -TERM "$PID" 2>/dev/null || true
+    CLOSED=$((CLOSED + 1))
+done
+
+if [ "$CLOSED" -eq 0 ]; then
+    echo "no launcher window to close"
+fi

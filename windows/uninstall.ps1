@@ -19,7 +19,8 @@ $InstallFolders = @(
 
 $TaskNames = @(
     "Steam Game Cartridge Monitor",
-    "PC Cartridge System Monitor"
+    "PC Cartridge System Monitor",
+    "PC Cartridge System Watcher"
 )
 
 
@@ -54,6 +55,12 @@ foreach ($TaskName in $TaskNames) {
 ########################################
 # Remove installed files
 ########################################
+
+Write-Host "Stopping the watcher..."
+
+Get-Process -Name "pc-cartridge-watcher" -ErrorAction SilentlyContinue |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 400
 
 Write-Host "Removing installed files..."
 

@@ -1,10 +1,14 @@
 // PC Cartridge Launcher — Tauri 2.0 backend
 //
-// Exposes four commands to the frontend:
-//   parse_cartridge(drive_path)              -> CartridgeInfo
-//   read_image_as_data_uri(path)             -> String (base64 data URI)
+// Exposes three commands to the frontend:
+//   parse_cartridge(drive_path)              -> CartridgeInfo (cover included)
 //   launch_game(executable, drive_path)      -> ()
 //   eject_drive(drive_path)                  -> ()
+//
+// There is deliberately no command that takes a path to read. An earlier
+// read_image_as_data_uri(path) let the webview turn any file on the system into
+// a data URI; the cover is now read here, from a path this file derives and
+// confines to the cartridge itself.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -21,14 +25,25 @@ use std::process::Command;
 pub struct CartridgeInfo {
     /// Display title of the game / cartridge.
     title: String,
-    /// Absolute path to the cover image, or empty string if none.
+    /// Absolute path to the cover image, or empty string if none. Shown in the
+    /// details sheet; never sent back to the backend.
     cover_path: String,
+    /// The cover as a `data:` URI, or empty string if there is none.
+    ///
+    /// Inlined rather than served over the asset protocol: cartridge mount
+    /// points are arbitrary, so a scope wide enough to serve them would be wide
+    /// enough to serve anything on the machine.
+    cover: String,
     /// The value from the `executable` / `open` key — either a URI or a
     /// relative path on the cartridge.
     executable: String,
     /// The root path of the cartridge drive as supplied by the caller.
     drive_path: String,
 }
+
+/// Largest cover we will base64 into the webview. A cartridge is not a trusted
+/// input, and a 200 MB "cover" should fail rather than be inlined.
+const MAX_COVER_BYTES: u64 = 8 * 1024 * 1024;
 
 // --------------------------------------------------------------------------
 // Inline INI / conf file parser
@@ -102,6 +117,7 @@ fn read_cartridge_info(drive_path: &str) -> Result<CartridgeInfo, String> {
 
         return Ok(CartridgeInfo {
             title,
+            cover: cover_as_data_uri(&cover_path),
             cover_path,
             executable,
             drive_path: drive_path.to_string(),
@@ -130,6 +146,7 @@ fn read_cartridge_info(drive_path: &str) -> Result<CartridgeInfo, String> {
 
         return Ok(CartridgeInfo {
             title,
+            cover: cover_as_data_uri(&cover_path),
             cover_path,
             executable,
             drive_path: drive_path.to_string(),
@@ -144,12 +161,79 @@ fn read_cartridge_info(drive_path: &str) -> Result<CartridgeInfo, String> {
 /// Resolve a relative cover image path, falling back to common filenames.
 fn resolve_cover(root: &Path, rel: &str) -> String {
     if !rel.is_empty() {
-        let p = root.join(rel);
-        if p.exists() {
-            return p.to_string_lossy().to_string();
+        if let Some(p) = join_within(root, rel) {
+            if p.is_file() {
+                return p.to_string_lossy().to_string();
+            }
         }
     }
     find_cover_image(root)
+}
+
+/// Join a cartridge-supplied relative path onto the drive root, refusing
+/// anything that would leave the drive.
+///
+/// `cover=` comes out of a file on a volume someone else may have written, so
+/// `..\..\Users\me\.ssh\id_rsa` has to be rejected rather than read and handed
+/// to the webview.
+fn join_within(root: &Path, rel: &str) -> Option<PathBuf> {
+    use std::path::Component;
+
+    let candidate = Path::new(rel);
+    // Absolute paths and drive-qualified paths (`C:\…`) are never relative to
+    // this cartridge.
+    if candidate.is_absolute() || rel.contains(':') {
+        return None;
+    }
+
+    let mut out = PathBuf::new();
+    for component in candidate.components() {
+        match component {
+            Component::Normal(part) => out.push(part),
+            Component::CurDir => {}
+            // Any climb out, and any root or drive prefix, disqualifies it.
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    if out.as_os_str().is_empty() {
+        return None;
+    }
+    Some(root.join(out))
+}
+
+/// Read a cover image and encode it as a `data:` URI. Any failure yields an
+/// empty string: a missing or oversized cover is not a reason to refuse the
+/// cartridge, the placeholder just stays.
+fn cover_as_data_uri(path: &str) -> String {
+    if path.is_empty() {
+        return String::new();
+    }
+    let p = Path::new(path);
+    match std::fs::metadata(p) {
+        Ok(meta) if meta.len() > MAX_COVER_BYTES => return String::new(),
+        Ok(_) => {}
+        Err(_) => return String::new(),
+    }
+    let Ok(bytes) = std::fs::read(p) else {
+        return String::new();
+    };
+
+    let mime = match p
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase()
+        .as_str()
+    {
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "avif" => "image/avif",
+        "ico" => "image/x-icon",
+        _ => "image/png",
+    };
+
+    format!("data:{mime};base64,{}", base64_encode(&bytes))
 }
 
 /// Look for common cover image filenames in the root of the cartridge.
@@ -166,7 +250,7 @@ fn find_cover_image(root: &Path) -> String {
     ];
     for name in &candidates {
         let p = root.join(name);
-        if p.exists() {
+        if p.is_file() {
             return p.to_string_lossy().to_string();
         }
     }
@@ -183,36 +267,31 @@ fn parse_cartridge(drive_path: String) -> Result<CartridgeInfo, String> {
     read_cartridge_info(&drive_path)
 }
 
-/// Read an image file and return it as a base64 data URI.
+/// The cartridge this window was started for.
+///
+/// The frontend asks for this rather than reading a query string: the window is
+/// declared in tauri.conf.json and loads `index.html` with no parameters, so
+/// there is nothing in the URL to read.
 #[tauri::command]
-fn read_image_as_data_uri(path: String) -> Result<String, String> {
-    use std::io::Read;
+fn drive_path() -> String {
+    drive_from_args(std::env::args().skip(1))
+}
 
-    if path.is_empty() {
-        return Ok(String::new());
+/// Pull the value of `--drive` out of an argument list.
+///
+/// Accepts `--drive X` and `--drive=X`. Returns an empty string when absent,
+/// which the frontend reports as "no cartridge" rather than guessing.
+fn drive_from_args<I: Iterator<Item = String>>(args: I) -> String {
+    let mut args = args;
+    while let Some(arg) = args.next() {
+        if arg == "--drive" {
+            return args.next().unwrap_or_default();
+        }
+        if let Some(value) = arg.strip_prefix("--drive=") {
+            return value.to_string();
+        }
     }
-
-    let mut file =
-        std::fs::File::open(&path).map_err(|e| format!("Cannot open image {path}: {e}"))?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|e| format!("Cannot read image {path}: {e}"))?;
-
-    let ext = PathBuf::from(&path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-
-    let mime = match ext.as_str() {
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        _ => "image/png",
-    };
-
-    let b64 = base64_encode(&bytes);
-    Ok(format!("data:{mime};base64,{b64}"))
+    String::new()
 }
 
 /// Minimal base64 encoder — avoids adding a `base64` crate dependency.
@@ -476,8 +555,8 @@ fn get_parent_device(partition: &str) -> String {
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            drive_path,
             parse_cartridge,
-            read_image_as_data_uri,
             launch_game,
             eject_drive,
         ])

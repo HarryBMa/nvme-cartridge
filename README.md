@@ -1,278 +1,177 @@
-# Disclaimer
+# NVMe Game Cartridges
 
-This project is a hobby experiment and is not an official Steam product.
-
-Automatic launching depends on your operating system settings and security policies. Some systems may require additional configuration for automounting drives or allowing scripts to run automatically.
-
-**Although there is a safe guard feature to auto-launch only trusted scripts, it still IS a security risk. Anyone with physical access to your PC *could* plug in a drive with a script on it, find the project folder and put their script to the trusted list. But at that point they could just execute their script already.<br>**
-
-**Use this at your own risk**
-
-
-
-
-# PC Cartridge System
-
-<img width="970" height="546" alt="JTDUMcuDBav3BEspNBMw6A-970-80 jpg" src="https://github.com/user-attachments/assets/8c0a8d2b-ce5a-4aa5-9bac-5805016db31f" />
-
-<br>
-Physical game cartridges for your Steam library using 2.5" SATA SSDs.
-
-Turn your digital Steam games into something that feels physical: insert a cartridge, and your PC automatically detects it and launches the configured game or action.
-
-Each cartridge is a simple storage device containing a small launcher script. When inserted, the system detects the cartridge and executes the script file on the drive if it has been classified "trusted". 
-Launching a Steam/GoG game, opening a game's details page, or running any custom commands.
-
-## 3D-Print Files
-STEP-Files are available over at MakerWorld: [MakerWorld](https://makerworld.com/en/models/3057977-2-5-ssd-dock-cartridge-system#profileId-3440827)
-
-## Quickstart
-### Linux
-
-Clone the repository:
-
-```bash
-git clone https://github.com/LewdM3at/PC-Cartridge-System.git
-```
-Enter the project directory:
-```bash
-cd PC-Cartridge-System
-```
-Run the script:
-```bash
-./cartridge-linux.sh
-```
-<img width="811" height="425" alt="image" src="https://github.com/user-attachments/assets/9118395d-f977-48bb-bf3a-867d5a6143fd" />
-
-
-**Installation**<br>
-Select menu point 1) Install<br>
-The installer will install the required udev rule, systemd service, and launcher helper.
-
-**Trust Scripts / Check trust state**<br>
-After you have created a Cartridge with the launch.sh script, add the script to trusted-scripts with menu point 2) Trust Scripts.
-It will scan for any connected storage media for the launch.sh script and ask if you want to trust said script:
-<img width="656" height="592" alt="image" src="https://github.com/user-attachments/assets/ec8772e4-8e48-40f4-878b-5741eac8cc05" />
-
-
-You can also check the trust state of scripts here and have the option to stop trusting the scripts if they are already trusted.
-
-Any script that hasn't been trusted through this process **will NOT be automatically executed**
-! If you modify the script later on, you have to re-add it to trusted scripts again.<br>
-
-**Auto-Launch Scripts**<br>
-<img width="428" height="191" alt="image" src="https://github.com/user-attachments/assets/b233100c-f527-442b-87d6-c8746865450f" /><br>
-You can toggle the automatic execution of scripts by choosing this menu point.<br>
-For when you want to change something inside the script and don't want it to auto-launch when you insert the cartridge.<br>
-
-
-**Uninstallation:**<br>
-Select menu point 4) Uninstall <br>
-This will remove everything including the config files and trust scripts list.
-
-### Windows
-
-Download the repo:
-1. Click Code → Download ZIP OR download it from [Releases](https://github.com/LewdM3at/PC-Cartridge-System/releases)
-2. Extract it
-3. Right click on cartridge-windows.ps1 -> Run with Powershell
-
-<img width="807" height="329" alt="image" src="https://github.com/user-attachments/assets/88e48354-0e2a-4d78-8e93-81e306e84617" />
-<br>
-
-**Installation**<br>
-Select menu point 1) Install<br>
-The installer will install the required udev rule, systemd service, and launcher helper.
-
-**Trust Scripts**<br>
-After you have created a Cartridge with the launch.sh script, add the script to trusted-scripts with menu point 2) Trust Scripts.
-It will scan for any connected storage media for the launch.sh script and ask if you want to trust said script.
-<img width="656" height="446" alt="image" src="https://github.com/user-attachments/assets/a1c71905-2e77-4ec0-99da-1a8e78f65035" />
-
-You can also check the trust state of scripts here and have the option to stop trusting the scripts if they are already trusted.
-Any script that hasn't been trusted through this process **will NOT be automatically executed**
-! If you modify the script later on, you have to re-add it to trusted scripts again.<br>
-
-**Auto-Launch Scripts**<br>
-<img width="442" height="157" alt="image" src="https://github.com/user-attachments/assets/51109e77-a2e0-45da-be9a-3b621d3c7fd1" />
-
-You can toggle the automatic execution of scripts by choosing this menu point.<br>
-For when you want to change something inside the script and don't want it to auto-launch when you insert the cartridge.<br>
-
-**Uninstallation:**<br>
-Select menu point 4) Uninstall <br>
-This will remove everything including the config files and trust scripts list.
-
-
-## Supported Storage
-
-The project is designed around **2.5" SATA SSDs**.
-
-However, the same concept may work with other storage devices such as:
-
-- SD cards
-- USB flash drives
-- External HDDs
-- Other removable storage
-
-Compatibility with other storage types is **not guaranteed** and depends on your operating system, filesystem, automount configuration, and hardware.
-
-## How It Works
-
-Each cartridge contains a launcher script (launch.sh/launch.ps1) that will be executed by the helpers (depending on OS).
-Configure these scripts to whatever you need with Steam URL Protocol or any custom commands.
-
-### Linux
-
-The Linux version uses three components:
-
-- **udev rule**<br>
-The udev rule detects when a new storage partition is connected.<br>
-Its only job is to notify systemd that a game cartridge may have been inserted.<br>
-It does not execute the cartridge directly.<br>
-
-- **systemd service**<br>
-A systemd template service is used to handle cartridge launches.<br>
-The template allows the same service to work with any inserted device.<br>
-The service starts the launcher helper and passes the detected device name.<br>
-
-- **cartridge-launcher-helper**<br>
-The helper script waits for the desktop environment to mount the drive, then searches the cartridge at rool level for: `launch.sh` <br>
-If found, it checks the SHA256 sums of said script against the stored trusted-scripts file. <br>
-If the SHA256 matches, it executes the script.<br>
-Example cartridge:<br>
-SSD<br>
-└── launch.sh<br>
-└── SteamLibrary<br>
-The content of `launch.sh` decide what happens next.
-
----
-
-#### Windows
-
-The Windows version uses two components:
-
-
-- **Task Scheduler**<br>
-The installer creates a scheduled task that starts the cartridge monitor when the user logs in.<br>
-The task keeps the monitor running silently in the background.<br>
-- **cartridge-monitoring.ps1**<br>
-The PowerShell script monitors for newly inserted storage devices.<br>
-When a new drive is detected, it checks the root of the cartridge for: `launch.ps1` <br>
-If found, it checks the SHA256 sums of said script against the stored trusted-scripts file. <br>
-If the SHA256 matches, it executes the script.<br>
-Example cartridge:<br>
-SSD<br>
-└── launch.ps1<br>
-└── SteamLibrary<br>
-The content of `launch.ps1` decide what happens next.
-
----
-
-## Tauri UI
-
-A ready-to-build graphical popup is included in `tauri-ui/`.  The cover art
-fills the window, with the game title and **Play** / **Eject** over it; drive
-and launch details sit behind the gear.  See
-[`tauri-ui/README.md`](tauri-ui/README.md) for build instructions.
+Turn NVMe drives into physical game cartridges. Plug one in, and a launcher pops
+up with the game's cover art and two buttons: **Play** and **Eject**.
 
 <img width="420" alt="The cartridge launcher showing cover art, the game title, and Play / Eject buttons" src="docs/launcher.png" />
 
----
+Each cartridge is just a drive with a `cartridge.conf` at its root naming the
+game. There are no scripts to write and nothing to allowlist.
 
-## Advanced Features
-
-### cartridge.conf — URI and executable launcher
-
-Instead of hard-coding the game command in `launch.ps1` / `launch.sh`, you can place a
-`cartridge.conf` file at the root of the cartridge and use the URI-aware template scripts
-from `example-scripts/Windows/URI-Launch/` or `example-scripts/Linux/URI-Launch/`.
-
-`cartridge.conf` format (plain text):
+## How it works
 
 ```
-executable=steam://rungameid/1091500
-title=My Game
-cover=cover.png
+drive plugged in
+      │
+      ├─ Linux    udev rule ──▶ systemd unit ──▶ helper waits for the mount
+      └─ Windows  watcher (resident, ~2 MB) sees the volume arrive
+      │
+      ▼
+is there a cartridge.conf at the root?   ──no──▶  nothing happens
+      │ yes
+      ▼
+launcher opens with the cover art
+      │
+      ├─ Play   ──▶ starts what cartridge.conf names, then closes
+      └─ Eject  ──▶ flushes, unmounts, powers the drive down
 ```
 
-The `executable` value can be:
-- A **URI** for any protocol handler registered on the OS (`steam://`, `heroic://`, `gog://`, `epic://`, `lutris://`, etc.)
-- A **relative path** to a file on the cartridge (e.g. `Game\bin\game.exe` on Windows or `Game/bin/start.sh` on Linux)
+Nothing on the cartridge is executed automatically. The launcher shows you what
+it found and waits — pressing Play is the gate.
 
-A full annotated example is at `example-scripts/cartridge.conf.example`.
+### Idle cost
 
-#### How URI detection works
+The point is that this costs nothing while you are not using it.
 
-**Windows (`launch.ps1`):** if `executable` starts with a known scheme, `Start-Process` is
-called with the URI string directly — Windows ShellExecute routes it to the registered
-protocol handler automatically.
+| | Idle |
+|---|---|
+| **Linux** | **nothing resident.** udev is already part of the OS; the rule adds no process. The launcher exists only while its window is open. |
+| **Windows** | **one small process, ~2 MB.** `pc-cartridge-watcher.exe` blocks on the Windows message queue, so it uses no CPU until a volume arrives. |
 
-**Linux (`launch.sh`):** if `executable` starts with a known scheme, `xdg-open` is called —
-it routes the URI to the default handler registered with the desktop environment.
+The launcher itself is a webview, so it is not small while it is on screen —
+expect roughly 100 MB for the few seconds it is up, then it exits and gives all
+of it back. There is no tray icon and no background service for the UI.
 
----
+## Hardware
 
-### Safe Eject
+Built around **NVMe drives in USB-C enclosures**. Small capacities are ideal —
+128 GB holds most single games, and the drive's whole job is to be one cartridge.
 
-#### Windows
+It works with any removable storage the OS will automount: SATA SSDs in docks,
+SD cards, USB sticks, external HDDs. Nothing here is specific to NVMe beyond the
+form factor being pleasant to handle.
 
-Use menu option **4) Eject cartridge** in `cartridge-windows.ps1` to safely flush the write
-cache and dismount a drive before pulling it out.
+**Filesystem:** exFAT if you want the cartridge to work on both Windows and
+Linux. NTFS or ext4 are fine for one OS.
 
-Alternatively run `windows\eject.ps1` directly:
+## Setup
+
+### Prerequisites
+
+Rust (stable) and Node 18+, plus a C toolchain for your platform.
+
+```bash
+# Linux
+sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev libssl-dev
+
+# Windows: Visual Studio Build Tools, "Desktop development with C++"
+```
+
+### Build and install
+
+```bash
+git clone https://github.com/HarryBMa/nvme-cartridge.git
+cd nvme-cartridge
+
+# The launcher, on both platforms
+cd tauri-ui && npm install && npm run build && cd ..
+```
+
+**Linux**
+
+```bash
+./cartridge-linux.sh     # → 1) Install
+```
+
+Installs the udev rule, the systemd template unit, the mount helper and the
+launcher binary.
+
+**Windows**
 
 ```powershell
-.\windows\eject.ps1 -DriveLetter D
+cd watcher; cargo build --release; cd ..
+# Right-click cartridge-windows.ps1 → Run with PowerShell → 1) Install
 ```
 
-The script first tries `Win32_Volume.Dismount()` and falls back to `mountvol /P` if that
-fails.
+Installs the watcher and launcher to `%LOCALAPPDATA%\PC-Cartridge-System` and
+registers a logon task to start the watcher.
 
-#### Linux
+## Making a cartridge
 
-After a cartridge's `launch.sh` script exits, the launcher helper automatically unmounts
-and powers off the drive via `udisksctl`.
+Copy `cartridge.conf.example` to the root of the drive as `cartridge.conf`:
 
-For manual ejection, use the installed helper:
-
-```bash
-pc-cartridge-eject sdb
+```ini
+executable=steam://rungameid/1091500
+title=Cyberpunk 2077
+cover=cover.jpg
 ```
 
-Or run the script directly:
+Drop a `cover.jpg` next to it — portrait art at 3:4 fills the launcher window
+exactly. That is the entire cartridge:
 
-```bash
-sudo linux/eject.sh sdb
+```
+NVME-DRIVE/
+├── cartridge.conf
+├── cover.jpg
+└── SteamLibrary/        (optional — the game itself can live here)
 ```
 
----
+Then unplug it and plug it back in.
 
-### Auto-close on cartridge removal
+`executable=` takes any URI the OS can handle (`steam://`, `heroic://`, `gog://`,
+`epic://`, `playnite://`, `lutris://`, `http://`, `https://`) or a path to a file
+on the cartridge. See `cartridge.conf.example` for the full list of keys.
 
-#### Windows
+A classic `autorun.inf` is also read, for `label` and `icon` only. Its `open=`
+and `shellexecute=` keys are deliberately ignored — Windows has ignored them on
+non-optical media since Windows 7, and they are the oldest autorun malware vector
+there is.
 
-When a drive is physically removed (or ejected), the cartridge monitor (`cartridge-monitoring.ps1`)
-detects the `DeviceRemoved` event and terminates the process that was launched for that
-drive. The process receives `CloseMainWindow()` first (allowing a graceful shutdown) and
-`Stop-Process -Force` after a 2-second timeout if it has not yet exited.
+## Security
 
-#### Linux
+Nothing on a cartridge runs without a click. That is the whole model, and it is
+why there is no trust list, no SHA-256 allowlist and no auto-launch toggle —
+earlier versions auto-executed a `launch.sh` on insert, which needed an allowlist
+to be safe at all.
 
-The `BindsTo=dev-%i.device` directive in `game-cartridge@.service` means systemd
-automatically stops the service when the device disappears. In addition, the udev
-`ACTION=="remove"` rule fires `game-cartridge-remove@.service`, which sends `SIGTERM`
-(and then `SIGKILL` if needed) to any running `launch.sh` processes.
+What that leaves:
 
----
+- **Play runs what `cartridge.conf` says.** If `executable=` points at a binary
+  on the drive, Play runs that binary. On your own cartridges that is the
+  feature. On a drive someone hands you, read the conf first — or keep to
+  `steam://`-style URIs, where the argument goes to a program you already trust.
+- **The launcher window cannot read your disk.** The webview has no filesystem
+  access and no command that takes a path. The cover is read in Rust, from a path
+  confined to the cartridge, and passed in as a `data:` URI.
+- **Nothing is fetched.** Fonts are bundled, the cover is inlined, and the
+  content-security policy is `default-src 'self'`.
+- **A plugged-in cartridge shows a window.** Detection reads
+  `cartridge.conf` — a text file — and draws the title. Titles are inserted as
+  text, never as markup.
 
-### Tauri frontends — loading images from the cartridge drive
+## Layout
 
-Tauri's default security policy blocks access to files outside the app bundle. Two
-patterns for displaying cartridge images (e.g. cover art) are documented and demonstrated
-in `example-scripts/Tauri-Frontend/tauri-asset-loading.md`:
+```
+cartridge-linux.sh          installer menu (Linux)
+cartridge-windows.ps1       installer menu (Windows)
+cartridge.conf.example      the one file a cartridge needs
+linux/                      udev rule, systemd units, mount + eject helpers
+windows/                    install / uninstall / eject scripts
+watcher/                    resident volume watcher (Windows only, Rust)
+tauri-ui/                   the launcher popup (Tauri 2 + Rust, no framework)
+docs/                       screenshots
+```
 
-- **Pattern A** — enable `assetProtocol` in `tauri.conf.json` (`security.assetProtocol.scope`) and use
-  `convertFileSrc()` in the frontend.
-- **Pattern B** — read image bytes in a Rust `#[tauri::command]` and return a base64
-  data URI (no `tauri.conf.json` change required; works with any dynamic drive letter).
+## Uninstall
+
+Run the installer menu and choose Uninstall. It removes the udev rule and
+systemd units (Linux), or the logon task and install folder (Windows).
+
+## Disclaimer
+
+A hobby project, not affiliated with Valve or Steam.
+
+Auto-detection depends on your OS automounting removable drives. Some setups need
+that configured before any of this works.
+
+Use at your own risk.

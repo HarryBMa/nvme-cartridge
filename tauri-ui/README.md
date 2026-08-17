@@ -65,36 +65,29 @@ sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev \
 ```bash
 cd tauri-ui
 npm install
-npm run build     # production bundle → src-tauri/target/release/
-# or
-npm run dev       # dev server with hot-reload
+npm run build     # → src-tauri/target/release/pc-cartridge-launcher
+npm run dev       # run it against a drive, for development
 ```
 
-## Launching from a cartridge script
+There is no bundler: `index.html` and `src/` are shipped as-is, which is why
+`frontendDist` points at this directory.
 
-The UI reads the cartridge drive path from the `?drive=` query parameter.
-Your cartridge's `launch.ps1` (Windows) or `launch.sh` (Linux) should start the
-launcher binary with the drive path:
+## How it gets started
 
-**Windows `launch.ps1`:**
-```powershell
-$Drive = Split-Path -Qualifier $MyInvocation.MyCommand.Path
-$LauncherExe = "C:\Path\To\pc-cartridge-launcher.exe"
-Start-Process $LauncherExe -ArgumentList "--drive `"$Drive\`""
-```
+The launcher takes the cartridge's mount point on the command line and shows one
+cartridge per window:
 
-**Linux `launch.sh`:**
 ```bash
-DRIVE="$(df --output=target "$(dirname "$0")" | tail -1)"
-/usr/local/bin/pc-cartridge-launcher --drive "$DRIVE"
+pc-cartridge-launcher --drive /run/media/you/CARTRIDGE   # Linux
+pc-cartridge-launcher.exe --drive "D:\"                  # Windows
 ```
 
-The Tauri app can also be started with a `?drive=` query string when the
-dev server is running:
+Nothing on the cartridge invokes it. On Linux a udev rule starts
+`linux/cartridge-launcher-helper.sh`, which waits for the automount and then runs
+the launcher; on Windows `watcher/` sees the volume arrive and does the same. See
+the [main README](../README.md) for the full path.
 
-```
-http://localhost:1420/?drive=D%3A%5C
-```
+The window exits after Play, Eject or dismiss, so nothing stays resident.
 
 ## Cartridge format
 

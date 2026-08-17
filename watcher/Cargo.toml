@@ -1,0 +1,23 @@
+[package]
+name = "pc-cartridge-watcher"
+version = "0.1.0"
+edition = "2021"
+description = "Waits for a cartridge to be plugged in and opens the launcher"
+license = "MIT"
+
+# Deliberately no dependencies beyond the Windows API bindings: this process is
+# resident for the whole login session, so everything it links is RAM that never
+# comes back.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+panic = "abort"
+codegen-units = 1
+strip = true

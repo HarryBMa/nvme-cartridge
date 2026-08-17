@@ -5,10 +5,12 @@
  * backend what is on the cartridge, and wires up Play and Eject.
  *
  * Backend contract (src-tauri/src/main.rs):
- *   parse_cartridge({ drivePath })            -> { title, cover_path, executable, drive_path }
- *   read_image_as_data_uri({ path })          -> "data:image/…;base64,…"
+ *   parse_cartridge({ drivePath })            -> { title, cover, cover_path, executable, drive_path }
  *   launch_game({ executable, drivePath })    -> ()
  *   eject_drive({ drivePath })                -> ()
+ *
+ * `cover` arrives as a data URI already. There is no command that takes a path
+ * to read, so the webview cannot ask the backend for arbitrary files.
  *
  * All cartridge-supplied text is written with textContent. The title and paths
  * come off an untrusted volume and must never be able to inject markup.
@@ -216,7 +218,22 @@ async function closeWindow() {
    Boot
    ========================================================================== */
 
-function drivePathFromQuery() {
+/**
+ * Which cartridge this window is for.
+ *
+ * Inside Tauri the answer comes from the backend, which has the `--drive`
+ * argument it was started with. The query string is only for the browser
+ * preview, where there is no backend to ask.
+ */
+async function resolveDrivePath() {
+  if (tauri) {
+    try {
+      const fromArgs = await invoke("drive_path");
+      if (fromArgs) return fromArgs;
+    } catch {
+      // fall through to the query string
+    }
+  }
   return new URLSearchParams(location.search).get("drive") ?? "";
 }
 
@@ -232,7 +249,7 @@ function fail(headline, detail) {
 }
 
 async function init() {
-  const drivePath = drivePathFromQuery();
+  const drivePath = await resolveDrivePath();
 
   if (!drivePath) {
     fail("No cartridge", "The launcher was started without a --drive path.");
@@ -261,14 +278,9 @@ async function init() {
       "No executable set in cartridge.conf, so there is nothing to play. Eject is still available.";
   }
 
-  if (cartridge.cover_path) {
-    try {
-      const uri = await invoke("read_image_as_data_uri", { path: cartridge.cover_path });
-      if (uri) await showCover(uri);
-    } catch {
-      // No cover: the placeholder stays.
-    }
-  }
+  // No cover, an unreadable one or one over the size cap all arrive as "", and
+  // the placeholder simply stays.
+  if (cartridge.cover) await showCover(cartridge.cover);
 
   setBusy(false);
   await showWindow();
@@ -378,12 +390,13 @@ async function demoInvoke(command, args) {
     case "parse_cartridge":
       return {
         title: "Cinder & Salt",
-        cover_path: "src/demo/cover.jpg",
+        // A plain path stands in for the data URI the backend would send; the
+        // browser loads it directly.
+        cover: "src/demo/cover.jpg",
+        cover_path: "D:\\cover.jpg",
         executable: state === "noexec" ? "" : "steam://rungameid/367520",
         drive_path: args.drivePath,
       };
-    case "read_image_as_data_uri":
-      return args.path; // the browser can load the file directly
     default:
       console.log("[preview]", command, args);
       return "";
