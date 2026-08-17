@@ -79,8 +79,9 @@ function Show-Menu {
 
     Write-Host "           │"
 
-    Write-Host "        │   4) Uninstall                          │"
-    Write-Host "        │   5) Exit                               │"
+    Write-Host "        │   4) Eject cartridge                    │"
+    Write-Host "        │   5) Uninstall                          │"
+    Write-Host "        │   6) Exit                               │"
     Write-Host "        ╰─────────────────────────────────────────╯"
     Write-Host ""
 
@@ -115,6 +116,13 @@ while ($true) {
 
         "4" {
             Clear-Host
+            Write-Host "Eject cartridge..."
+            & "$ScriptDir\windows\eject.ps1"
+            Clear-Host
+        }
+
+        "5" {
+            Clear-Host
             Write-Host "Starting uninstall..."
             Start-Process `
                 powershell.exe `
@@ -123,7 +131,7 @@ while ($true) {
                 -Wait
         }
 
-        "5" {
+        "6" {
             Clear-Host
             exit
         }
