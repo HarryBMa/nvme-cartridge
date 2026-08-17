@@ -1,0 +1,33 @@
+[package]
+name = "cartridge-launcher"
+version = "0.1.0"
+description = "Cartridge launcher for the PC Cartridge System"
+authors = ["PC Cartridge System contributors"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+# Tauri wants the app logic in a lib so the mobile entry point can reach it.
+name = "cartridge_launcher_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+sha2 = "0.10"
+dirs = "5"
+thiserror = "2"
+# Mount-table enumeration. `disk` only: no process or network probing.
+sysinfo = { version = "0.33", default-features = false, features = ["disk"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
