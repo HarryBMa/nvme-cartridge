@@ -1,5 +1,6 @@
 [Unit]
 Description=PC Cartridge System (%i)
+BindsTo=dev-%i.device
 After=dev-%i.device
 
 [Service]
