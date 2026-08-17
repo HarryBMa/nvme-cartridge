@@ -169,6 +169,14 @@ The content of `launch.ps1` decide what happens next.
 
 ---
 
+## Tauri UI
+
+A ready-to-build graphical popup is included in `tauri-ui/`.  It shows cover
+art, the game title, and **Play** / **Eject** buttons in a compact frameless
+window.  See [`tauri-ui/README.md`](tauri-ui/README.md) for build instructions.
+
+---
+
 ## Advanced Features
 
 ### cartridge.conf — URI and executable launcher
@@ -261,7 +269,7 @@ Tauri's default security policy blocks access to files outside the app bundle. T
 patterns for displaying cartridge images (e.g. cover art) are documented and demonstrated
 in `example-scripts/Tauri-Frontend/tauri-asset-loading.md`:
 
-- **Pattern A** — add the drive root to `assetScope` in `tauri.conf.json` and use
+- **Pattern A** — enable `assetProtocol` in `tauri.conf.json` (`security.assetProtocol.scope`) and use
   `convertFileSrc()` in the frontend.
 - **Pattern B** — read image bytes in a Rust `#[tauri::command]` and return a base64
   data URI (no `tauri.conf.json` change required; works with any dynamic drive letter).
