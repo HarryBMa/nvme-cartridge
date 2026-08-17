@@ -1,206 +1,570 @@
-/* =========================================================
-   PC Cartridge Launcher — dark popup UI
-   ========================================================= */
+/* ==========================================================================
+   PC Cartridge Launcher
+   --------------------------------------------------------------------------
+   The window is the cover art. A cartridge is a physical object you just
+   pushed into a dock, so the moment it appears should be about the artwork —
+   not about a form. Only three things sit on top of it: what it is, Play, and
+   Eject. Anything the machine knows beyond that lives behind the gear.
 
-:root {
-  --bg:          #0f0f13;
-  --surface:     #1a1a23;
-  --border:      #2a2a38;
-  --accent:      #7c6af7;       /* purple */
-  --accent-dark: #5a49d6;
-  --danger:      #e05c5c;
-  --danger-dark: #b84040;
-  --text:        #e8e8f0;
-  --muted:       #7878a0;
-  --radius:      16px;
-  --radius-sm:   8px;
+   Neutrals are tinted warm (hue 65) rather than pure black, and the single
+   accent is sampled from the cover art at runtime so the chrome belongs to
+   whatever game is in the dock.
+   ========================================================================== */
+
+@font-face {
+  font-family: "Archivo";
+  src: url("fonts/archivo-latin-var.woff2") format("woff2-variations");
+  font-weight: 400 800;
+  font-stretch: 62% 125%;
+  font-display: block;
 }
 
-/* Reset */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+@font-face {
+  font-family: "Spline Sans Mono";
+  src: url("fonts/spline-sans-mono-latin.woff2") format("woff2");
+  font-weight: 400 600;
+  font-display: block;
+}
 
-html, body {
-  width: 420px;
-  height: 560px;
-  overflow: hidden;
-  font-family: 'Segoe UI', system-ui, sans-serif;
-  font-size: 14px;
-  color: var(--text);
-  background: transparent;
+:root {
+  --shell: oklch(0.155 0.005 65);
+  --ink: oklch(0.97 0.006 75);
+  --ink-2: oklch(0.75 0.008 75);
+  --ink-3: oklch(0.56 0.008 75);
+  --hairline: oklch(1 0 0 / 0.16);
+
+  /* Replaced from the artwork on load. */
+  --accent: oklch(0.72 0.15 68);
+  --accent-ink: oklch(0.16 0.02 65);
+  --danger: oklch(0.68 0.19 27);
+
+  --radius: 16px;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1); /* ease-out-quint */
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
 }
 
 body {
-  display: flex;
-  flex-direction: column;
-  background: var(--bg);
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.8);
+  background: transparent; /* the window itself is transparent */
+  font-family: "Archivo", ui-sans-serif, sans-serif;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  cursor: default;
   user-select: none;
 }
 
-/* ---- Title bar ---- */
-#titlebar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  background: var(--surface);
-  border-radius: var(--radius) var(--radius) 0 0;
-  border-bottom: 1px solid var(--border);
-  cursor: default;
-}
+/* ==========================================================================
+   Card
+   ========================================================================== */
 
-#app-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  color: var(--accent);
-  text-transform: uppercase;
-}
-
-#btn-close {
-  background: none;
-  border: none;
-  color: var(--muted);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  transition: color 0.15s, background 0.15s;
-}
-#btn-close:hover { color: var(--text); background: var(--border); }
-
-/* ---- Cover art ---- */
-#cover-wrapper {
+#card {
   position: relative;
-  flex: 0 0 260px;
+  width: 100vw;
+  height: 100vh;
   overflow: hidden;
-  background: var(--surface);
+  border-radius: var(--radius);
+  background: var(--shell);
+  isolation: isolate;
+  box-shadow:
+    inset 0 0 0 1px oklch(1 0 0 / 0.08),
+    0 20px 44px -14px oklch(0 0 0 / 0.7);
+  animation: card-in 460ms var(--ease) both;
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98) translateY(8px);
+  }
 }
 
 #cover-img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  display: none;
-  transition: opacity 0.3s;
+  display: block;
+  animation: cover-in 700ms 40ms var(--ease) both;
 }
 
-#cover-img.loaded { display: block; opacity: 1; }
+@keyframes cover-in {
+  from {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+}
+
+#cover-img:not([src]),
+#cover-img[src=""] {
+  display: none;
+}
 
 #cover-placeholder {
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-content: center;
+  justify-items: center;
   gap: 12px;
-  color: var(--muted);
+  color: var(--ink-3);
+  background: repeating-linear-gradient(
+    135deg,
+    oklch(0.185 0.005 65) 0 8px,
+    oklch(0.16 0.005 65) 8px 16px
+  );
 }
-#cover-placeholder.hidden { display: none; }
-#cover-placeholder svg { opacity: 0.35; }
-#cover-placeholder p { font-size: 12px; opacity: 0.5; }
 
-/* ---- Info panel ---- */
-#info-panel {
-  padding: 14px 18px 6px;
-  flex: 1;
+#cover-placeholder.hidden {
+  display: none;
+}
+
+#cover-placeholder p {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+/* --- Scrims -------------------------------------------------------------
+   The art is arbitrary, so the type cannot rely on it being dark. These two
+   gradients guarantee contrast without dimming the whole image. */
+
+#scrim-top {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 96px;
+  background: linear-gradient(
+    to bottom,
+    oklch(0.12 0.004 65 / 0.72) 0%,
+    oklch(0.12 0.004 65 / 0.34) 55%,
+    transparent 100%
+  );
+}
+
+/* Tight on purpose: it has to carry the title and the buttons, and nothing
+   more. A tall, soft scrim would dim the half of the artwork that people
+   actually look at. */
+#scrim-bottom {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 36%;
+  background:
+    /* a breath of the sampled colour, as if the art were lighting the shelf */
+    linear-gradient(
+      to top,
+      color-mix(in oklch, var(--accent) 9%, transparent) 0%,
+      transparent 38%
+    ),
+    linear-gradient(
+      to top,
+      oklch(0.1 0.004 65 / 0.97) 0%,
+      oklch(0.1 0.004 65 / 0.93) 18%,
+      oklch(0.1 0.004 65 / 0.72) 40%,
+      oklch(0.11 0.004 65 / 0.36) 65%,
+      oklch(0.11 0.004 65 / 0.1) 86%,
+      transparent 100%
+    );
+}
+
+/* One pass of the read head as the cartridge is taken in. */
+#read-line {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 38%;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    color-mix(in oklch, var(--accent) 16%, transparent) 80%,
+    color-mix(in oklch, var(--accent) 58%, transparent) 99%,
+    transparent 100%
+  );
+  animation: read 1200ms 200ms cubic-bezier(0.36, 0, 0.66, 1) both;
+}
+
+@keyframes read {
+  from {
+    transform: translateY(-105%);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  to {
+    transform: translateY(270%);
+    opacity: 0;
+  }
+}
+
+/* ==========================================================================
+   Top chrome
+   ========================================================================== */
+
+#chrome {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 15px 15px 15px 18px;
+  animation: fade 420ms 260ms linear both;
+}
+
+#eyebrow {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 9.5px;
+  font-weight: 700;
+  font-stretch: 108%;
+  letter-spacing: 0.19em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  text-shadow: 0 1px 3px oklch(0 0 0 / 0.6);
+}
+
+#pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--accent);
+  animation: pip 2.6s steps(1, end) infinite;
+}
+
+@keyframes pip {
+  0%, 62% { opacity: 1; }
+  63%, 74% { opacity: 0.2; }
+  75%, 100% { opacity: 1; }
+}
+
+#card.is-blocked #pip {
+  background: var(--danger);
+}
+
+#chrome-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.icon-btn {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: oklch(0.14 0.004 65 / 0.5);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background-color 130ms linear, color 130ms linear;
+}
+
+.icon-btn:hover {
+  background: oklch(0.14 0.004 65 / 0.82);
+  color: var(--ink);
+}
+
+.icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+#btn-details[aria-expanded="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* ==========================================================================
+   Stage: title and the two actions
+   ========================================================================== */
+
+#stage {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 3;
+  padding: 0 20px 20px;
 }
 
 #game-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  margin: 0;
+  font-size: clamp(27px, 8.4vw, 37px);
+  font-weight: 800;
+  font-stretch: 110%;
+  line-height: 0.94;
+  letter-spacing: -0.022em;
+  text-transform: uppercase;
+  text-wrap: balance;
+  text-shadow: 0 2px 12px oklch(0 0 0 / 0.55);
+  animation: rise 520ms 300ms var(--ease) both;
 }
 
-#game-executable {
-  margin-top: 4px;
-  font-size: 11px;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* Long titles give up width before they give up size. */
+#game-title.is-long {
+  font-size: clamp(21px, 6.2vw, 27px);
+  font-stretch: 88%;
+  letter-spacing: -0.008em;
+  line-height: 1;
 }
 
-/* ---- Status bar ---- */
-#status-bar {
-  padding: 4px 18px 8px;
-  min-height: 24px;
+/* Shown only when something is stopping Play from working. */
+#notice {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: color-mix(in oklch, var(--danger) 72%, var(--ink));
+  animation: rise 460ms var(--ease) both;
 }
 
-#status-text {
-  font-size: 11px;
-  color: var(--muted);
-  font-style: italic;
-}
-
-#status-text.error { color: var(--danger); font-style: normal; }
-#status-text.success { color: #6be08a; font-style: normal; }
-
-/* ---- Buttons ---- */
 #button-row {
   display: flex;
-  gap: 10px;
-  padding: 10px 16px 16px;
+  gap: 9px;
+  margin-top: 18px;
+  animation: rise 520ms 380ms var(--ease) both;
 }
 
 .btn {
-  flex: 1;
-  display: flex;
+  appearance: none;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  font-stretch: 106%;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  height: 46px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  padding: 10px 0;
-  border: none;
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  font-weight: 600;
+  gap: 9px;
+  border-radius: 5px;
   cursor: pointer;
-  transition: background 0.15s, transform 0.1s, opacity 0.15s;
+  transition:
+    transform 130ms var(--ease),
+    background-color 130ms linear,
+    border-color 130ms linear,
+    color 130ms linear;
 }
 
-.btn:active:not(:disabled) { transform: scale(0.97); }
-.btn:disabled { opacity: 0.35; cursor: default; }
+.btn:active {
+  transform: translateY(1px);
+}
 
-.btn-primary {
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.btn__key {
+  font-family: "Spline Sans Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1;
+  padding: 3px 4px 2px;
+  border-radius: 2px;
+  opacity: 0.72;
+}
+
+/* Primary: the only filled surface in the window. */
+.btn--play {
+  flex: 1;
+  border: 0;
+  padding: 0 18px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.26);
 }
-.btn-primary:hover:not(:disabled) { background: var(--accent-dark); }
 
-.btn-secondary {
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--border);
+.btn--play:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--accent) 88%, white);
 }
-.btn-secondary:hover:not(:disabled) { background: var(--danger); border-color: var(--danger); }
 
-/* ---- Loading spinner overlay ---- */
-#spinner {
-  display: none;
+.btn--play .btn__key {
+  background: oklch(0 0 0 / 0.18);
+}
+
+.btn--play:disabled {
+  cursor: not-allowed;
+  background: oklch(0.3 0.005 65 / 0.85);
+  color: var(--ink-3);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.btn--play:disabled .btn__key {
+  background: oklch(0 0 0 / 0.22);
+}
+
+/* Secondary: hairline only, so the choice is never ambiguous. */
+.btn--eject {
+  padding: 0 17px;
+  border: 1px solid var(--hairline);
+  background: oklch(0.14 0.004 65 / 0.45);
+  color: var(--ink);
+}
+
+.btn--eject:hover:not(:disabled) {
+  border-color: oklch(1 0 0 / 0.32);
+  background: oklch(0.18 0.004 65 / 0.7);
+}
+
+.btn--eject .btn__key {
+  background: oklch(1 0 0 / 0.1);
+}
+
+.btn--eject:disabled {
+  cursor: not-allowed;
+  color: var(--ink-3);
+  border-color: oklch(1 0 0 / 0.08);
+}
+
+/* ==========================================================================
+   Details sheet
+   ========================================================================== */
+
+#sheet {
   position: absolute;
   inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  padding: 15px 18px 18px;
+  background: oklch(0.145 0.005 65);
+  transform: translateY(100%);
+  transition: transform 340ms var(--ease);
+}
+
+#sheet[hidden] {
+  /* Kept in the layout so it can animate; hidden from the a11y tree instead. */
+  display: flex;
+  visibility: hidden;
+}
+
+#sheet.is-open {
+  transform: translateY(0);
+  visibility: visible;
+}
+
+#sheet-head {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  background: rgba(15, 15, 19, 0.7);
-  border-radius: var(--radius);
-  z-index: 10;
-}
-#spinner.active { display: flex; }
-
-.spin-ring {
-  width: 40px;
-  height: 40px;
-  border: 4px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid oklch(1 0 0 / 0.09);
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
+#sheet-head h2 {
+  margin: 0;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.19em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+#specs {
+  margin: 0;
+  overflow-y: auto;
+}
+
+#specs > div {
+  padding: 11px 0;
+  border-bottom: 1px solid oklch(1 0 0 / 0.055);
+}
+
+#specs dt {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+#specs dd {
+  margin: 5px 0 0;
+  font-family: "Spline Sans Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+#specs dd.is-muted {
+  color: var(--ink-3);
+}
+
+/* ==========================================================================
+   Toast
+   ========================================================================== */
+
+#toast {
+  position: absolute;
+  inset: auto 20px 92px;
+  z-index: 4;
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: center;
+  padding: 9px 12px;
+  border-radius: 5px;
+  background: oklch(0.11 0.004 65 / 0.95);
+  box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.1);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 190ms linear, transform 240ms var(--ease);
+  pointer-events: none;
+}
+
+#toast.is-on {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+#toast.is-error {
+  color: color-mix(in oklch, var(--danger) 78%, var(--ink));
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--danger) 34%, transparent);
+}
+
+/* ==========================================================================
+   Shared
+   ========================================================================== */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 1ms !important;
+  }
+}

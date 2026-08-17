@@ -171,9 +171,12 @@ The content of `launch.ps1` decide what happens next.
 
 ## Tauri UI
 
-A ready-to-build graphical popup is included in `tauri-ui/`.  It shows cover
-art, the game title, and **Play** / **Eject** buttons in a compact frameless
-window.  See [`tauri-ui/README.md`](tauri-ui/README.md) for build instructions.
+A ready-to-build graphical popup is included in `tauri-ui/`.  The cover art
+fills the window, with the game title and **Play** / **Eject** over it; drive
+and launch details sit behind the gear.  See
+[`tauri-ui/README.md`](tauri-ui/README.md) for build instructions.
+
+<img width="420" alt="The cartridge launcher showing cover art, the game title, and Play / Eject buttons" src="docs/launcher.png" />
 
 ---
 

@@ -3,10 +3,7 @@
   "version": "0.1.0",
   "identifier": "com.pc-cartridge.launcher",
   "build": {
-    "frontendDist": "../dist",
-    "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "",
-    "beforeBuildCommand": ""
+    "frontendDist": ".."
   },
   "app": {
     "withGlobalTauri": true,
@@ -24,9 +21,9 @@
       }
     ],
     "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'",
       "assetProtocol": {
-        "enable": true,
-        "scope": ["**"]
+        "enable": false
       }
     }
   },

@@ -1,24 +1,51 @@
 # PC Cartridge Launcher — Tauri UI
 
-A compact, dark popup window that appears when a cartridge is inserted.
-Built with **Tauri 2.0** (Rust backend) and plain HTML/CSS/JS (no framework needed).
+A compact popup that appears when a cartridge is inserted.
+Built with **Tauri 2.0** (Rust backend) and plain HTML/CSS/JS — no framework, no
+bundler, no network access at runtime.
 
+![The launcher, showing cover art, the game title, and Play / Eject](../docs/launcher.png)
+
+The window is 420 × 560 — the 3:4 of a cover — and the cover art fills it. Only
+three things sit on top: what the cartridge is, **Play**, and **Eject**.
+Everything the launcher knows beyond that lives behind the gear:
+
+![The details sheet](../docs/launcher-details.png)
+
+### Design notes
+
+- **The accent colour is sampled from the cover art** at load, so the Play
+  button belongs to whatever game is in the dock. Each pixel is weighted by its
+  own saturation squared and biased toward the lit areas, because a flat average
+  of any cover is mud. The ink on the button is then chosen for contrast against
+  that colour, so the label stays readable whatever the artwork is.
+- **The scrim behind the title is deliberately short.** It has to carry the
+  title and the buttons and nothing else; a tall, soft gradient would dim the
+  half of the artwork people actually look at.
+- **Nothing is fetched.** Fonts are bundled as woff2 and the cover is passed in
+  as a `data:` URI, so the CSP can stay at `default-src 'self'` and the Tauri
+  asset protocol stays switched off.
+
+### Keyboard
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Play |
+| `E` | Eject |
+| `I` | Toggle details |
+| `Esc` | Close details, or dismiss the window |
+
+## Previewing without a cartridge
+
+The page serves a sample cartridge when it is opened outside Tauri, so the
+window can be worked on without a physical drive:
+
+```bash
+npx http-server tauri-ui     # → http://localhost:8080/?drive=/demo
 ```
-┌──────────────────────────────┐
-│  PC CARTRIDGE            [×] │   ← draggable title bar
-├──────────────────────────────┤
-│                              │
-│         [cover art]          │   ← 260 px cover image
-│                              │
-├──────────────────────────────┤
-│  Cyberpunk 2077              │   ← title from cartridge.conf
-│  steam://rungameid/1091500   │   ← executable field
-│                              │
-│  Ready                       │   ← status bar
-├──────────────────────────────┤
-│   [▶ Play]    [⏏ Eject]      │
-└──────────────────────────────┘
-```
+
+Append `&state=noexec` to see the case where `cartridge.conf` sets no
+`executable`.
 
 ## Prerequisites
 
@@ -98,7 +125,9 @@ tauri-ui/
 ├── index.html                  # Main HTML shell
 ├── src/
 │   ├── main.js                 # Frontend logic (Tauri invoke calls)
-│   └── style.css               # Dark popup styles
+│   ├── style.css               # Popup styles
+│   ├── fonts/                  # Bundled woff2 (Archivo, Spline Sans Mono)
+│   └── demo/                   # Sample cover art for browser preview
 ├── src-tauri/
 │   ├── Cargo.toml
 │   ├── build.rs
