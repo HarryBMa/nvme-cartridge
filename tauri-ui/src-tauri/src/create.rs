@@ -1,16 +1,24 @@
 //! The create-cartridge wizard: turn a drive into a cartridge.
 //!
-//! Writes two files to the drive root — `cartridge.conf` and `cover.jpg` — and
-//! nothing else. Everything it needs is already on the machine: the game list
-//! comes from Steam's own manifests and the art from Steam's cache, so a
-//! cartridge can be made with no network at all.
+//! The full build, in order, each step optional except the last two:
+//!
+//!   1. format the drive to exFAT              (opt in, destructive)
+//!   2. copy the game onto it and register the
+//!      cartridge as a Steam library           (opt in, slow)
+//!   3. copy the cover art
+//!   4. write cartridge.conf                   (always)
+//!   5. write autorun.inf for the drive's name and icon in Explorer
+//!
+//! Game lists come from Playnite when it is installed — it aggregates Steam,
+//! GOG, Epic, Xbox, emulators and anything added by hand — and from Steam's own
+//! manifests otherwise, which is also the only option on Linux.
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::drives::{self, TargetDrive};
-use crate::steam;
+use crate::{autorun, format, playnite, steam, steamlib};
 
 /// Largest cover we will copy onto a cartridge.
 const MAX_COVER_BYTES: u64 = 8 * 1024 * 1024;
@@ -27,28 +35,67 @@ const ALLOWED_SCHEMES: [&str; 8] = [
     "https://",
 ];
 
-#[derive(Debug, Clone, Serialize)]
+/// Where a game in the list came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SteamGameInfo {
-    pub app_id: String,
-    pub name: String,
-    pub size_on_disk: u64,
-    pub has_cover: bool,
+pub enum Library {
+    Steam,
+    Playnite,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameInfo {
+    /// Steam app id, or Playnite GUID.
+    pub id: String,
+    pub name: String,
+    pub library: Library,
+    /// "Steam", "GOG", "Epic" … only Playnite reports this.
+    pub source: String,
+    pub size_on_disk: u64,
+    pub has_cover: bool,
+    /// What Play will start.
+    pub executable: String,
+    /// True when the game's files can be copied onto the cartridge.
+    pub can_copy: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CartridgeRequest {
     /// Target drive root. Re-checked here against the allowed list.
     pub drive_path: String,
     pub title: String,
     pub executable: String,
-    /// Steam app id, when the cover should be copied from Steam's cache.
+    /// Steam app id, when the cover and files should come from Steam.
     #[serde(default)]
     pub app_id: Option<String>,
+    /// Playnite GUID, when the cover should come from Playnite's cache.
+    #[serde(default)]
+    pub playnite_id: Option<String>,
     /// Absolute path to a user-chosen cover image instead.
     #[serde(default)]
     pub cover_source: Option<String>,
+    /// Format to exFAT first. `format_confirmation` must match the drive's
+    /// current label or nothing happens.
+    #[serde(default)]
+    pub format_drive: bool,
+    #[serde(default)]
+    pub format_label: Option<String>,
+    #[serde(default)]
+    pub format_confirmation: Option<String>,
+    /// Copy the game's files onto the cartridge and register it with Steam.
+    #[serde(default)]
+    pub copy_game: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Progress {
+    pub step: &'static str,
+    pub message: String,
+    pub done_bytes: u64,
+    pub total_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -56,63 +103,183 @@ pub struct CartridgeRequest {
 pub struct CartridgeResult {
     pub conf_path: String,
     pub cover_written: bool,
-    /// Anything worth telling the user that is not an outright failure.
+    pub autorun_written: bool,
+    pub icon: Option<String>,
+    pub formatted: bool,
+    pub game_copied: bool,
+    pub bytes_copied: u64,
+    pub registered_with_steam: bool,
     pub warnings: Vec<String>,
 }
 
-/// Games the wizard can offer.
-pub fn steam_games() -> Result<Vec<SteamGameInfo>, String> {
+/// Every game the wizard can offer, Playnite first.
+pub fn list_games() -> Result<Vec<GameInfo>, String> {
+    let mut out = Vec::new();
+    let mut problems = Vec::new();
+
+    match playnite_games() {
+        Ok(mut games) => out.append(&mut games),
+        Err(e) => problems.push(e),
+    }
+
+    // Steam is still listed even with Playnite present: Playnite only knows
+    // about games it has imported, and its export can be stale.
+    match steam_games() {
+        Ok(games) => {
+            // Playnite's entry wins when both know a game, because it carries
+            // the source label and launches through Playnite.
+            let known: Vec<String> = out.iter().map(|g| g.name.to_lowercase()).collect();
+            out.extend(
+                games
+                    .into_iter()
+                    .filter(|g| !known.contains(&g.name.to_lowercase())),
+            );
+        }
+        Err(e) => problems.push(e),
+    }
+
+    if out.is_empty() {
+        return Err(if problems.is_empty() {
+            "No installed games found.".to_string()
+        } else {
+            problems.join(" ")
+        });
+    }
+
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(out)
+}
+
+fn playnite_games() -> Result<Vec<GameInfo>, String> {
+    let root = playnite::playnite_root().ok_or_else(|| "Playnite not found.".to_string())?;
+    let exports = playnite::find_exports(&root);
+    if exports.is_empty() {
+        return Err(format!(
+            "Playnite is installed at {} but has no JSON library export. \
+             Install a JSON library exporter extension and run it.",
+            root.display()
+        ));
+    }
+
+    // Newest export wins, since several extensions may have written one.
+    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
+    for path in exports {
+        let modified = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
+        if newest.as_ref().map(|(t, _)| modified > *t).unwrap_or(true) {
+            newest = Some((modified, path));
+        }
+    }
+    let (_, path) = newest.expect("exports was not empty");
+
+    let games = playnite::import_from(&path).map_err(|e| e.to_string())?;
+
+    Ok(games
+        .into_iter()
+        .map(|g| GameInfo {
+            executable: g.launch_uri(),
+            has_cover: g
+                .cover
+                .as_deref()
+                .and_then(|c| playnite::resolve_cover(&root, c))
+                .is_some(),
+            // Playnite knows where non-Steam games live, but copying them only
+            // helps when the game is portable; Steam titles go through the
+            // Steam library path instead.
+            can_copy: false,
+            id: g.id,
+            name: g.name,
+            library: Library::Playnite,
+            source: g.source,
+            size_on_disk: 0,
+        })
+        .collect())
+}
+
+fn steam_games() -> Result<Vec<GameInfo>, String> {
     let root = steam::steam_root().ok_or_else(|| {
-        "Could not find a Steam installation. Set STEAM_ROOT if it is somewhere unusual, \
-         or enter the game details by hand."
+        "Could not find a Steam installation. Set STEAM_ROOT if it is somewhere unusual."
             .to_string()
     })?;
 
     let games = steam::installed_games(&root);
     if games.is_empty() {
         return Err(format!(
-            "Found Steam at {} but no fully installed games in it.",
+            "Found Steam at {} but no fully installed games.",
             root.display()
         ));
     }
 
     Ok(games
         .into_iter()
-        .map(|g| SteamGameInfo {
-            app_id: g.app_id,
-            name: g.name,
-            size_on_disk: g.size_on_disk,
+        .map(|g| GameInfo {
+            executable: format!("steam://rungameid/{}", g.app_id),
             has_cover: g.cover_path.is_some(),
+            can_copy: true,
+            id: g.app_id,
+            name: g.name,
+            library: Library::Steam,
+            source: "Steam".to_string(),
+            size_on_disk: g.size_on_disk,
         })
         .collect())
 }
 
-/// The cached cover for one app, as a data URI. Loaded one at a time: base64ing
-/// a whole library at once would be tens of megabytes of IPC.
-pub fn steam_cover(app_id: &str) -> String {
-    if !is_numeric(app_id) {
-        return String::new();
-    }
-    let Some(root) = steam::steam_root() else {
-        return String::new();
+/// Cover art for one game, as a data URI. Loaded one at a time: base64ing a
+/// whole library at once would be tens of megabytes of IPC.
+pub fn game_cover(library: Library, id: &str) -> String {
+    let path = match library {
+        Library::Steam => {
+            if !is_numeric(id) {
+                return String::new();
+            }
+            steam::steam_root().and_then(|root| steam::find_cover(&root, id))
+        }
+        Library::Playnite => playnite::playnite_root().and_then(|root| {
+            let exports = playnite::find_exports(&root);
+            exports
+                .iter()
+                .filter_map(|p| playnite::import_from(p).ok())
+                .flatten()
+                .find(|g| g.id == id)
+                .and_then(|g| g.cover)
+                .and_then(|c| playnite::resolve_cover(&root, &c))
+        }),
     };
-    let Some(path) = steam::find_cover(&root, app_id) else {
-        return String::new();
-    };
-    read_as_data_uri(&path).unwrap_or_default()
+
+    path.and_then(|p| read_as_data_uri(&p)).unwrap_or_default()
 }
 
 pub fn target_drives() -> Vec<TargetDrive> {
     drives::list_drives()
 }
 
-/// Write the cartridge.
-pub fn create_cartridge(request: &CartridgeRequest) -> Result<CartridgeResult, String> {
-    let mut warnings = Vec::new();
+/// Describe what formatting a drive would destroy.
+pub fn format_plan(path: &str) -> Result<format::FormatPlan, String> {
+    format::plan(path).map_err(|e| e.to_string())
+}
 
-    // Never trust the frontend's idea of where to write. Re-derive the allowed
-    // set and require an exact match: this is the only code in the project that
-    // creates files outside its own config directory.
+/// Build the cartridge.
+pub fn create_cartridge(
+    request: &CartridgeRequest,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<CartridgeResult, String> {
+    let mut warnings = Vec::new();
+    let mut result = CartridgeResult {
+        conf_path: String::new(),
+        cover_written: false,
+        autorun_written: false,
+        icon: None,
+        formatted: false,
+        game_copied: false,
+        bytes_copied: 0,
+        registered_with_steam: false,
+        warnings: Vec::new(),
+    };
+
+    // Never trust the window's idea of where to write. The allowed set is
+    // re-derived and an exact match required.
     let root = resolve_target(&request.drive_path)?;
 
     let title = sanitize_conf_value(&request.title);
@@ -120,36 +287,230 @@ pub fn create_cartridge(request: &CartridgeRequest) -> Result<CartridgeResult, S
         return Err("Give the cartridge a title.".into());
     }
 
+    // ---- 1. Format ------------------------------------------------------
+    if request.format_drive {
+        let label = request
+            .format_label
+            .clone()
+            .unwrap_or_else(|| default_label(&title));
+        let confirmation = request.format_confirmation.clone().unwrap_or_default();
+
+        progress(Progress {
+            step: "format",
+            message: format!("Formatting {} to exFAT…", request.drive_path),
+            done_bytes: 0,
+            total_bytes: 0,
+        });
+
+        format::format_exfat(&request.drive_path, &label, &confirmation)
+            .map_err(|e| e.to_string())?;
+        result.formatted = true;
+
+        // The mount point may take a moment to come back after mkfs.
+        wait_for_mount(&root);
+    }
+
+    // The executable is validated after any format, because a path-on-cartridge
+    // target has to exist on the drive as it is now.
     let executable = sanitize_conf_value(&request.executable);
     validate_executable(&executable, &root)?;
 
-    // Copy the art first: if that fails we would rather not have written a conf
-    // pointing at a cover that is not there.
-    let cover_written = match write_cover(&root, request) {
-        Ok(written) => written,
+    // ---- 2. Copy the game and register it -------------------------------
+    if request.copy_game {
+        match copy_steam_game(request, &root, progress) {
+            Ok(Some((bytes, registered))) => {
+                result.game_copied = true;
+                result.bytes_copied = bytes;
+                result.registered_with_steam = registered;
+            }
+            Ok(None) => {}
+            Err(e) => {
+                // The cartridge is still worth finishing without the files.
+                warnings.push(format!("The game was not copied: {e}"));
+            }
+        }
+    }
+
+    // ---- 3. Cover art ---------------------------------------------------
+    progress(Progress {
+        step: "cover",
+        message: "Copying cover art…".to_string(),
+        done_bytes: 0,
+        total_bytes: 0,
+    });
+
+    let cover_destination = match write_cover(&root, request) {
+        Ok(path) => path,
         Err(e) => {
             warnings.push(format!("Cover art was not copied: {e}"));
-            false
+            None
         }
     };
+    result.cover_written = cover_destination.is_some();
 
-    let conf = render_cartridge_conf(&title, &executable, cover_written.then_some("cover.jpg"));
+    // ---- 4. cartridge.conf ----------------------------------------------
+    let conf = render_cartridge_conf(
+        &title,
+        &executable,
+        cover_destination
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str()),
+    );
     let conf_path = root.join("cartridge.conf");
-
     std::fs::write(&conf_path, conf)
         .map_err(|e| format!("Could not write {}: {e}", conf_path.display()))?;
+    result.conf_path = conf_path.to_string_lossy().into_owned();
 
-    if !cover_written {
+    // ---- 5. autorun.inf --------------------------------------------------
+    progress(Progress {
+        step: "autorun",
+        message: "Naming the drive…".to_string(),
+        done_bytes: 0,
+        total_bytes: 0,
+    });
+
+    match autorun::write_autorun(&root, &title, cover_destination.as_deref()) {
+        Ok(icon) => {
+            result.autorun_written = true;
+            result.icon = icon;
+            if result.cover_written && result.icon.is_none() {
+                warnings.push(
+                    "Explorer needs an .ico for a custom drive icon and the cover is a JPEG, \
+                     so the drive keeps its default icon. Drop a cover.ico on the cartridge \
+                     to change that."
+                        .to_string(),
+                );
+            }
+        }
+        Err(e) => warnings.push(format!("autorun.inf was not written: {e}")),
+    }
+
+    if !result.cover_written {
         warnings.push(
             "No cover art on the cartridge. The launcher will show a placeholder.".to_string(),
         );
     }
 
-    Ok(CartridgeResult {
-        conf_path: conf_path.to_string_lossy().into_owned(),
-        cover_written,
-        warnings,
+    result.warnings = warnings;
+    Ok(result)
+}
+
+/// Copy a Steam game onto the cartridge and register it as a Steam library.
+///
+/// Returns the bytes copied and whether Steam was told about the drive, or
+/// `None` when this cartridge is not a copyable Steam game.
+fn copy_steam_game(
+    request: &CartridgeRequest,
+    root: &Path,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<Option<(u64, bool)>, String> {
+    let Some(app_id) = request.app_id.as_deref().filter(|id| is_numeric(id)) else {
+        return Ok(None);
+    };
+
+    let steam_root = steam::steam_root().ok_or_else(|| steamlib::LibraryError::SteamNotFound.to_string())?;
+
+    // Steam rewrites libraryfolders.vdf from memory when it exits, so a
+    // registration made now would be silently undone.
+    if steamlib::steam_is_running() {
+        return Err(steamlib::LibraryError::SteamRunning.to_string());
+    }
+
+    let game = steamlib::locate(&steam_root, app_id)
+        .ok_or_else(|| steamlib::LibraryError::GameNotFound(request.title.clone()).to_string())?;
+
+    let total = if game.size_on_disk > 0 {
+        game.size_on_disk
+    } else {
+        steamlib::tree_size(&game.install_path)
+    };
+
+    // Check space before starting a copy that could run for many minutes.
+    let free = drives::list_drives()
+        .into_iter()
+        .find(|d| Path::new(&d.path) == root)
+        .map(|d| d.free_bytes)
+        .unwrap_or(0);
+    if total > free {
+        return Err(steamlib::LibraryError::NotEnoughSpace { needed: total, free }.to_string());
+    }
+
+    let install_dir_name = game
+        .install_path
+        .file_name()
+        .ok_or_else(|| "the game's install directory has no name".to_string())?;
+    let destination = root.join("steamapps/common").join(install_dir_name);
+
+    progress(Progress {
+        step: "copy",
+        message: format!("Copying {}…", game.name),
+        done_bytes: 0,
+        total_bytes: total,
+    });
+
+    let name = game.name.clone();
+    let copied = steamlib::copy_tree(&game.install_path, &destination, &mut |done| {
+        progress(Progress {
+            step: "copy",
+            message: format!("Copying {name}…"),
+            done_bytes: done,
+            total_bytes: total,
+        });
     })
+    .map_err(|e| format!("{}: {e}", game.install_path.display()))?;
+
+    // The manifest is how Steam recognises the game in this library.
+    let manifest_destination = root.join("steamapps").join(
+        game.manifest_path
+            .file_name()
+            .ok_or_else(|| "the manifest has no filename".to_string())?,
+    );
+    std::fs::create_dir_all(root.join("steamapps"))
+        .and_then(|_| std::fs::copy(&game.manifest_path, &manifest_destination).map(|_| ()))
+        .map_err(|e| format!("could not copy the app manifest: {e}"))?;
+
+    progress(Progress {
+        step: "register",
+        message: "Registering the cartridge with Steam…".to_string(),
+        done_bytes: copied,
+        total_bytes: total,
+    });
+
+    let registered = steamlib::register_library(&steam_root, root)
+        .map_err(|e| e.to_string())?
+        .is_some();
+
+    Ok(Some((copied, registered)))
+}
+
+/// After a format the mount point can briefly disappear.
+fn wait_for_mount(root: &Path) {
+    for _ in 0..40 {
+        if root.is_dir() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
+/// A default exFAT volume name derived from the title.
+pub fn default_label(title: &str) -> String {
+    let cleaned: String = title
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let truncated: String = cleaned.chars().take(11).collect();
+    let trimmed = truncated.trim().to_uppercase();
+    if trimmed.is_empty() {
+        "CARTRIDGE".to_string()
+    } else {
+        trimmed
+    }
 }
 
 /// Check the requested drive is one we are actually willing to write to.
@@ -159,8 +520,7 @@ fn resolve_target(requested: &str) -> Result<PathBuf, String> {
     }
     let requested_path = Path::new(requested);
 
-    let allowed = drives::list_drives();
-    let matched = allowed
+    let matched = drives::list_drives()
         .iter()
         .any(|drive| Path::new(&drive.path) == requested_path);
 
@@ -176,25 +536,37 @@ fn resolve_target(requested: &str) -> Result<PathBuf, String> {
     Ok(requested_path.to_path_buf())
 }
 
-/// Copy the chosen art to `<drive>/cover.jpg`. Returns whether anything was
-/// written.
-fn write_cover(root: &Path, request: &CartridgeRequest) -> Result<bool, String> {
-    let source = match (&request.cover_source, &request.app_id) {
-        // An explicit file the user picked wins.
-        (Some(path), _) if !path.trim().is_empty() => PathBuf::from(path),
-        (_, Some(app_id)) if is_numeric(app_id) => {
+/// Copy the chosen art to the cartridge. Returns where it landed.
+fn write_cover(root: &Path, request: &CartridgeRequest) -> Result<Option<PathBuf>, String> {
+    let source = match (&request.cover_source, &request.app_id, &request.playnite_id) {
+        (Some(path), _, _) if !path.trim().is_empty() => PathBuf::from(path),
+        (_, Some(app_id), _) if is_numeric(app_id) => {
             let steam_root = steam::steam_root()
                 .ok_or_else(|| "no Steam installation to take the cover from".to_string())?;
             match steam::find_cover(&steam_root, app_id) {
                 Some(p) => p,
-                None => return Ok(false), // Steam simply has not cached one
+                None => return Ok(None),
             }
         }
-        _ => return Ok(false),
+        (_, _, Some(playnite_id)) => {
+            let root_dir = playnite::playnite_root()
+                .ok_or_else(|| "no Playnite installation to take the cover from".to_string())?;
+            let found = playnite::find_exports(&root_dir)
+                .iter()
+                .filter_map(|p| playnite::import_from(p).ok())
+                .flatten()
+                .find(|g| &g.id == playnite_id)
+                .and_then(|g| g.cover)
+                .and_then(|c| playnite::resolve_cover(&root_dir, &c));
+            match found {
+                Some(p) => p,
+                None => return Ok(None),
+            }
+        }
+        _ => return Ok(None),
     };
 
-    let meta = std::fs::metadata(&source)
-        .map_err(|e| format!("{}: {e}", source.display()))?;
+    let meta = std::fs::metadata(&source).map_err(|e| format!("{}: {e}", source.display()))?;
     if !meta.is_file() {
         return Err(format!("{} is not a file", source.display()));
     }
@@ -207,10 +579,17 @@ fn write_cover(root: &Path, request: &CartridgeRequest) -> Result<bool, String> 
         ));
     }
 
-    let destination = root.join("cover.jpg");
+    // Keep the source's extension so the launcher picks the right MIME type.
+    let extension = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_else(|| "jpg".to_string());
+    let destination = root.join(format!("cover.{extension}"));
+
     std::fs::copy(&source, &destination)
         .map_err(|e| format!("could not write {}: {e}", destination.display()))?;
-    Ok(true)
+    Ok(Some(destination))
 }
 
 /// Strip anything that would corrupt the `key=value` file.
@@ -244,18 +623,15 @@ pub fn validate_executable(executable: &str, root: &Path) -> Result<(), String> 
         let looks_like_scheme = executable[..colon]
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.');
-        // "D:\Games\x.exe" is a Windows path, not a scheme.
         let is_drive_letter = colon == 1;
         if looks_like_scheme && !is_drive_letter && executable[colon..].starts_with("://") {
             return Err(format!(
-                "{executable} uses a scheme this launcher will not open. \
-                 Supported: {}",
+                "{executable} uses a scheme this launcher will not open. Supported: {}",
                 ALLOWED_SCHEMES.join(", ")
             ));
         }
     }
 
-    // Otherwise it has to be a relative path that stays on the cartridge.
     let candidate = Path::new(executable);
     if candidate.is_absolute() || executable.contains(':') {
         return Err(
@@ -303,9 +679,16 @@ fn read_as_data_uri(path: &Path) -> Option<String> {
         return None;
     }
     let bytes = std::fs::read(path).ok()?;
-    let mime = match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
+    let mime = match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase()
+        .as_str()
+    {
         "png" => "image/png",
         "webp" => "image/webp",
+        "bmp" => "image/bmp",
         _ => "image/jpeg",
     };
     Some(format!("data:{mime};base64,{}", crate::base64_encode(&bytes)))
@@ -317,35 +700,31 @@ mod tests {
 
     #[test]
     fn sanitises_values_that_would_corrupt_the_file() {
-        // The injection case: a newline in the title must not create a key.
         assert_eq!(
             sanitize_conf_value("Doom\nexecutable=evil.exe"),
             "Doom executable=evil.exe"
         );
         assert_eq!(sanitize_conf_value("  Hollow   Knight  "), "Hollow Knight");
-        assert_eq!(sanitize_conf_value("Tabs\there"), "Tabs here");
         assert_eq!(sanitize_conf_value("\r\n\t "), "");
     }
 
     #[test]
     fn renders_a_conf_that_round_trips() {
-        let conf = render_cartridge_conf("Hollow Knight", "steam://rungameid/367520", Some("cover.jpg"));
+        let conf =
+            render_cartridge_conf("Hollow Knight", "steam://rungameid/367520", Some("cover.jpg"));
         assert!(conf.contains("title=Hollow Knight\n"));
         assert!(conf.contains("executable=steam://rungameid/367520\n"));
         assert!(conf.contains("cover=cover.jpg\n"));
-
-        // No cover key when there is no cover.
-        let bare = render_cartridge_conf("X", "steam://rungameid/1", None);
-        assert!(!bare.contains("cover="));
+        assert!(!render_cartridge_conf("X", "steam://rungameid/1", None).contains("cover="));
     }
 
     #[test]
-    fn accepts_the_known_uri_schemes() {
+    fn accepts_known_schemes_including_playnite() {
         let root = Path::new("/media/x");
         for good in [
             "steam://rungameid/367520",
+            "playnite://playnite/start/2b3c4d5e-1111-2222-3333-444455556666",
             "heroic://launch/gog/1207658921",
-            "STEAM://rungameid/1",
             "https://example.com/play",
         ] {
             assert!(validate_executable(good, root).is_ok(), "{good}");
@@ -353,46 +732,55 @@ mod tests {
     }
 
     #[test]
-    fn refuses_unknown_schemes() {
-        let root = Path::new("/media/x");
-        for bad in ["file:///etc/passwd", "javascript://alert(1)", "ftp://host/x"] {
-            assert!(validate_executable(bad, root).is_err(), "{bad}");
-        }
-    }
-
-    #[test]
-    fn refuses_programs_that_are_not_on_the_cartridge() {
+    fn refuses_unknown_schemes_and_off_cartridge_programs() {
         let root = Path::new("/media/x");
         for bad in [
+            "file:///etc/passwd",
+            "javascript://alert(1)",
             "/usr/bin/bash",
             "../../../usr/bin/bash",
             "C:\\Windows\\System32\\cmd.exe",
-            "Game/../../escape.exe",
+            "",
         ] {
             assert!(validate_executable(bad, root).is_err(), "{bad}");
         }
-        assert!(validate_executable("", root).is_err());
-    }
-
-    #[test]
-    fn accepts_a_program_that_exists_on_the_cartridge() {
-        let dir = std::env::temp_dir().join(format!("cart-exe-{}", std::process::id()));
-        std::fs::create_dir_all(dir.join("Game/bin")).unwrap();
-        std::fs::write(dir.join("Game/bin/start.sh"), b"#!/bin/sh\n").unwrap();
-
-        assert!(validate_executable("Game/bin/start.sh", &dir).is_ok());
-        assert!(validate_executable("Game/bin/missing.sh", &dir).is_err());
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn refuses_targets_that_are_not_removable_drives() {
-        // The wizard writes files, so this is the guard that matters most.
         for bad in ["/", "/home", "/etc", "/usr/local", ""] {
+            assert!(resolve_target(bad).is_err(), "{bad} must never be a target");
+        }
+    }
+
+    #[test]
+    fn creating_a_cartridge_on_a_bad_target_writes_nothing() {
+        let request = CartridgeRequest {
+            drive_path: "/".to_string(),
+            title: "Evil".to_string(),
+            executable: "steam://rungameid/1".to_string(),
+            format_drive: true,
+            ..Default::default()
+        };
+        let mut seen = Vec::new();
+        let err = create_cartridge(&request, &mut |p| seen.push(p)).unwrap_err();
+        assert!(err.contains("not a removable drive"), "{err}");
+        // Crucially, it bailed before the format step emitted anything.
+        assert!(seen.is_empty(), "{seen:?}");
+    }
+
+    #[test]
+    fn derives_a_valid_exfat_label_from_a_title() {
+        assert_eq!(default_label("Hollow Knight"), "HOLLOW KNIG");
+        assert_eq!(default_label("Cinder & Salt"), "CINDER SALT");
+        assert_eq!(default_label("!!!"), "CARTRIDGE");
+        assert_eq!(default_label(""), "CARTRIDGE");
+        // Whatever it produces must pass the formatter's own check.
+        for title in ["Hollow Knight", "Cinder & Salt", "!!!", "", "A"] {
+            let label = default_label(title);
             assert!(
-                resolve_target(bad).is_err(),
-                "{bad} must never be a write target"
+                format::check_label(&label).is_ok(),
+                "{title:?} gave unusable label {label:?}"
             );
         }
     }

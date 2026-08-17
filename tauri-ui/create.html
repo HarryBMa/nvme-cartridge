@@ -32,7 +32,7 @@
         </div>
 
         <button id="btn-custom" class="link" type="button">
-          Not in Steam? Enter it by hand
+          Not in the list? Enter it by hand
         </button>
       </section>
 
@@ -75,6 +75,43 @@
           <p id="drives-empty" hidden></p>
         </div>
 
+        <h2 class="step"><span class="step__n">3</span> What to put on it</h2>
+
+        <div id="options">
+          <label class="opt">
+            <input id="opt-copy" type="checkbox" />
+            <span class="opt__body">
+              <span class="opt__label">Copy the game onto the cartridge</span>
+              <span class="opt__hint" id="opt-copy-hint">
+                Also registers the drive as a Steam library, so Steam plays from
+                the cartridge instead of your internal copy.
+              </span>
+            </span>
+          </label>
+
+          <label class="opt opt--danger">
+            <input id="opt-format" type="checkbox" />
+            <span class="opt__body">
+              <span class="opt__label">Format to exFAT first</span>
+              <span class="opt__hint">Erases everything on the drive.</span>
+            </span>
+          </label>
+
+          <div id="format-fields" hidden>
+            <label class="field">
+              <span class="field__label">New drive name</span>
+              <input id="format-label" type="text" maxlength="11" autocomplete="off"
+                     spellcheck="false" />
+            </label>
+            <label class="field">
+              <span class="field__label" id="confirm-label">Type the current name to confirm</span>
+              <input id="format-confirm" type="text" autocomplete="off" spellcheck="false"
+                     placeholder="" />
+            </label>
+            <p class="field__hint" id="format-warning"></p>
+          </div>
+        </div>
+
         <footer id="actions">
           <button id="btn-create" class="btn btn--primary" type="button" disabled>
             <span class="btn__label">Write cartridge</span>
@@ -83,6 +120,11 @@
             <span class="btn__label">Rescan</span>
           </button>
         </footer>
+
+        <div id="progress" hidden>
+          <div id="progress-track"><div id="progress-fill"></div></div>
+          <p id="progress-text" class="mono"></p>
+        </div>
 
         <p id="status" role="status" aria-live="polite"></p>
       </section>

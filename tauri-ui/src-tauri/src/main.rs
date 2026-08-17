@@ -15,10 +15,12 @@
 //   eject_drive(drive_path)                  -> ()
 //
 // Wizard commands:
-//   list_steam_games()                       -> Vec<SteamGameInfo>
-//   steam_cover(app_id)                      -> String (data URI)
+//   list_games()                             -> Vec<GameInfo>  (Playnite + Steam)
+//   game_cover(library, id)                  -> String (data URI)
 //   list_target_drives()                     -> Vec<TargetDrive>
-//   create_cartridge(request)                -> CartridgeResult
+//   format_plan(drive_path)                  -> FormatPlan
+//   create_cartridge(request)                -> CartridgeResult,
+//                                               emitting cartridge://progress
 //
 // There is deliberately no command that takes a path to read. An earlier
 // read_image_as_data_uri(path) let the webview turn any file on the system into
@@ -27,15 +29,19 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod autorun;
 mod create;
 mod drives;
+mod format;
+mod playnite;
 mod steam;
+mod steamlib;
 
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tauri::{WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, WebviewUrl, WebviewWindowBuilder};
 
 // --------------------------------------------------------------------------
 // Data types
@@ -569,21 +575,18 @@ fn get_parent_device(partition: &str) -> String {
 }
 
 // --------------------------------------------------------------------------
-// Entry point
-// --------------------------------------------------------------------------
-
-// --------------------------------------------------------------------------
 // Wizard commands
 // --------------------------------------------------------------------------
 
+/// Everything installed, from Playnite where available and Steam otherwise.
 #[tauri::command]
-fn list_steam_games() -> Result<Vec<create::SteamGameInfo>, String> {
-    create::steam_games()
+fn list_games() -> Result<Vec<create::GameInfo>, String> {
+    create::list_games()
 }
 
 #[tauri::command]
-fn steam_cover(app_id: String) -> String {
-    create::steam_cover(&app_id)
+fn game_cover(library: create::Library, id: String) -> String {
+    create::game_cover(library, &id)
 }
 
 #[tauri::command]
@@ -591,11 +594,28 @@ fn list_target_drives() -> Vec<drives::TargetDrive> {
     create::target_drives()
 }
 
+/// What formatting a drive would destroy, for the confirmation step.
 #[tauri::command]
-fn create_cartridge(
+fn format_plan(drive_path: String) -> Result<format::FormatPlan, String> {
+    create::format_plan(&drive_path)
+}
+
+/// Build the cartridge, streaming progress to the window.
+///
+/// Copying a game is minutes of work, so it runs on a blocking thread and emits
+/// `cartridge://progress` instead of leaving the window frozen.
+#[tauri::command]
+async fn create_cartridge(
+    window: tauri::WebviewWindow,
     request: create::CartridgeRequest,
 ) -> Result<create::CartridgeResult, String> {
-    create::create_cartridge(&request)
+    tauri::async_runtime::spawn_blocking(move || {
+        create::create_cartridge(&request, &mut |progress| {
+            let _ = window.emit("cartridge://progress", progress);
+        })
+    })
+    .await
+    .map_err(|e| format!("the build thread failed: {e}"))?
 }
 
 // --------------------------------------------------------------------------
@@ -613,16 +633,17 @@ fn main() {
             parse_cartridge,
             launch_game,
             eject_drive,
-            list_steam_games,
-            steam_cover,
+            list_games,
+            game_cover,
             list_target_drives,
+            format_plan,
             create_cartridge,
         ])
         .setup(move |app| {
             if wizard {
                 WebviewWindowBuilder::new(app, "create", WebviewUrl::App("create.html".into()))
                     .title("Create cartridge")
-                    .inner_size(820.0, 600.0)
+                    .inner_size(880.0, 660.0)
                     .resizable(false)
                     .decorations(false)
                     .transparent(true)

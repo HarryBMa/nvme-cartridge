@@ -58,6 +58,10 @@
 #pick-target {
   border-left: 1px solid var(--hairline-soft);
   background: oklch(0 0 0 / 0.14);
+  /* Opening the format fields makes this column taller than the window, so it
+     scrolls rather than pushing the buttons out of reach. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* --- Step headings ------------------------------------------------------ */
@@ -350,14 +354,144 @@ li:last-child .row {
   color: var(--ink-2);
 }
 
+/* --- Options ------------------------------------------------------------ */
+
+#options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.opt {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  cursor: pointer;
+}
+
+.opt input {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 1px 0 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.opt__body {
+  display: block;
+  min-width: 0;
+}
+
+.opt__label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.opt__hint {
+  display: block;
+  margin-top: 3px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+/* The destructive option is marked, not hidden. */
+.opt--danger .opt__label {
+  color: color-mix(in oklch, var(--danger) 68%, var(--ink));
+}
+
+.opt--danger input {
+  accent-color: var(--danger);
+}
+
+#format-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 2px 0 0 23px;
+  padding: 11px 12px;
+  border-left: 2px solid color-mix(in oklch, var(--danger) 55%, transparent);
+  background: color-mix(in oklch, var(--danger) 7%, transparent);
+  border-radius: 0 4px 4px 0;
+  animation: rise 320ms var(--ease) both;
+}
+
+/* `display` on an id beats the browser's [hidden] rule. */
+#format-fields[hidden] {
+  display: none;
+}
+
+#format-fields .field input:focus {
+  border-color: color-mix(in oklch, var(--danger) 60%, transparent);
+}
+
+#format-warning {
+  color: color-mix(in oklch, var(--danger) 70%, var(--ink));
+}
+
+/* --- Progress ----------------------------------------------------------- */
+
+#progress {
+  margin-top: 12px;
+}
+
+#progress[hidden] {
+  display: none;
+}
+
+#progress-track {
+  height: 4px;
+  border-radius: 2px;
+  background: oklch(0 0 0 / 0.45);
+  box-shadow: inset 0 0 0 1px var(--hairline-soft);
+  overflow: hidden;
+}
+
+#progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 200ms linear;
+}
+
+/* A step with no byte count still needs to look alive. */
+#progress-fill.is-indeterminate {
+  width: 35%;
+  animation: sweep 1100ms ease-in-out infinite;
+}
+
+@keyframes sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+
+#progress-text {
+  margin: 6px 0 0;
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+
 /* --- Actions ------------------------------------------------------------ */
 
 #actions {
   display: flex;
   gap: 9px;
   /* Anchored to the bottom of the column rather than left floating under the
-     drive list, so the primary action sits where one is looked for. */
+     drive list, so the primary action sits where one is looked for — and pinned
+     there, so it stays reachable when the column scrolls. */
   margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding-block: 12px;
+  /* Opaque: the scrolling content passes underneath. Matches the column's own
+     composited background. */
+  background: oklch(0.158 0.005 65);
 }
 
 #btn-create {

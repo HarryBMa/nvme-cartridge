@@ -110,14 +110,36 @@ pc-cartridge-launcher --create
 
 <img width="700" alt="The create-cartridge wizard: a searchable list of installed Steam games on the left, cover preview and drive picker on the right" src="docs/wizard.png" />
 
-It reads your installed Steam games from Steam's own `appmanifest` files and
-takes the cover art from Steam's local cache, so it works with no network. Pick a
-game, pick the drive, press Write. Games not in Steam can be entered by hand with
-any supported URI.
+It lists everything installed. **Playnite** is read first when it is present —
+that covers Steam, GOG, Epic, Xbox, Ubisoft, itch and emulators in one list —
+and Steam's own manifests are read too, which is also the only source on Linux.
+Cover art comes from Playnite's or Steam's local cache, so nothing is fetched.
 
-The wizard only ever writes two files, `cartridge.conf` and `cover.jpg`, and only
-to a removable drive — it re-checks the target itself rather than trusting the
-window, so it cannot be pointed at your system disk.
+Pick a game, pick the drive, choose what goes on it, press Write. The wizard can:
+
+- **write the launcher files** — `cartridge.conf` plus the cover art (always);
+- **name the drive** — an `autorun.inf` with `label=`, so Explorer shows
+  "HOLLOW KNIGHT" instead of "Removable Disk (D:)", and `icon=` when a usable
+  `.ico` can be produced;
+- **copy the game onto the cartridge** and register the drive in Steam's
+  `libraryfolders.vdf`, so Steam plays *from* the cartridge rather than your
+  internal copy. Close Steam first — it rewrites that file on exit;
+- **format the drive to exFAT**, off by default.
+
+Games not in any library can be entered by hand with any supported URI.
+
+### Formatting erases the drive
+
+Formatting is opt-in per cartridge and gated four ways: the target must be on the
+removable-drive allowlist the wizard re-derives itself, it must not be the system
+drive, and you must type the drive's **current** name back exactly before Write
+is even enabled.
+
+<img width="700" alt="The wizard with formatting enabled, showing the typed confirmation field and the Write button disabled until the name matches" src="docs/wizard-format.png" />
+
+The wizard only ever writes to the drive you picked — it re-checks the target
+itself rather than trusting the window, so it cannot be pointed at your system
+disk.
 
 ### By hand
 
@@ -186,6 +208,11 @@ tauri-ui/                   one binary, two windows (Tauri 2 + Rust, no framewor
   index.html                the launcher popup
   create.html               the create-cartridge wizard
   src/tokens.css            palette and type shared by both
+  src-tauri/src/playnite.rs  Playnite library import
+  src-tauri/src/steam.rs     Steam manifest / library reader
+  src-tauri/src/steamlib.rs  copy a game, register the cartridge with Steam
+  src-tauri/src/format.rs    exFAT formatting, behind confirmation
+  src-tauri/src/autorun.rs   autorun.inf for the drive's name and icon
 docs/                       screenshots
 ```
 
