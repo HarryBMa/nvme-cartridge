@@ -13,7 +13,8 @@
  *   format_plan({ drivePath })       -> { path, currentLabel, device, totalBytes, warning }
  *   executable_choices({ playniteId }) -> [{ relative, name, score }]  best first
  *   create_cartridge({ request })    -> { confPath, coverWritten, autorunWritten, icon,
- *                                          formatted, gameCopied, bytesCopied,
+ *                                          formatted, formattedFilesystem,
+ *                                          gameCopied, bytesCopied,
  *                                          registeredWithSteam, gameFolder, warnings }
  *
  * The backend re-derives the list of writable drives and re-checks the format
@@ -51,6 +52,7 @@ const el = {
   exeHint: document.getElementById("exe-hint"),
   optFormat: document.getElementById("opt-format"),
   formatFields: document.getElementById("format-fields"),
+  formatFilesystem: document.getElementById("format-filesystem"),
   formatLabel: document.getElementById("format-label"),
   formatConfirm: document.getElementById("format-confirm"),
   formatWarning: document.getElementById("format-warning"),
@@ -536,6 +538,10 @@ function refreshFormatFields() {
   }
 }
 
+function formatFilesystemLabel(filesystem) {
+  return filesystem === "exfat" ? "exFAT" : "btrfs";
+}
+
 /** Mirrors create.rs's default_label so the field starts where it would. */
 function defaultLabel(title) {
   const cleaned = title
@@ -808,6 +814,7 @@ async function writeCartridge() {
         title: want.title,
         executable: "",
         formatDrive: el.optFormat.checked,
+        formatFilesystem: el.formatFilesystem.value,
         formatLabel: el.formatLabel.value.trim() || null,
         formatConfirmation: el.formatConfirm.value.trim() || null,
         games: bundleList.map((g) => ({
@@ -827,6 +834,7 @@ async function writeCartridge() {
         playniteId: want.playniteId,
         coverSource: selectedCoverSource,
         formatDrive: el.optFormat.checked,
+        formatFilesystem: el.formatFilesystem.value,
         formatLabel: el.formatLabel.value.trim() || null,
         formatConfirmation: el.formatConfirm.value.trim() || null,
         copyGame: el.optCopy.checked,
@@ -838,7 +846,11 @@ async function writeCartridge() {
 
     const drive = drives.find((d) => d.path === selectedDrive);
     const parts = [`Cartridge written to ${drive ? drive.label : selectedDrive}.`];
-    if (result.formatted) parts.push("Formatted to btrfs.");
+    if (result.formatted) {
+      parts.push(
+        `Formatted to ${formatFilesystemLabel(result.formattedFilesystem || request.formatFilesystem)}.`,
+      );
+    }
     if (result.gameCopied) {
       parts.push(
         result.gameFolder
@@ -943,6 +955,7 @@ el.optFormat.addEventListener("change", () => {
   refreshOptions();
   refreshCreateButton();
 });
+el.formatFilesystem.addEventListener("change", refreshCreateButton);
 el.formatConfirm.addEventListener("input", refreshCreateButton);
 el.formatLabel.addEventListener("input", refreshCreateButton);
 el.create.addEventListener("click", writeCartridge);
@@ -1085,6 +1098,7 @@ async function demoInvoke(command, args) {
         autorunWritten: true,
         icon: null,
         formatted: args.request.formatDrive,
+        formattedFilesystem: args.request.formatFilesystem || "btrfs",
         gameCopied: args.request.copyGame,
         bytesCopied: args.request.copyGame ? 9_106_886_656 : 0,
         registeredWithSteam: args.request.copyGame && Boolean(args.request.appId),

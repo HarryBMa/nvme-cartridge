@@ -39,7 +39,7 @@ Surface tablets — in compact aluminium USB enclosures.
 |---|---|
 | **Drives** | 128 GB M.2 2230 NVMe |
 | **Enclosures** | ITGZ aluminium compact M.2 2230 case, USB 3.2 Gen 2 (10 Gbps), passive auto-cooling |
-| **Filesystem** | btrfs, for TRIM (discard=async) and zstd compression; Windows requires [WinBtrfs](https://github.com/maharmstone/btrfs) |
+| **Filesystem** | btrfs by default on NVMe cartridges for TRIM (discard=async) and zstd compression; exFAT is also available for broader removable-media compatibility. Windows requires [WinBtrfs](https://github.com/maharmstone/btrfs) only for btrfs. |
 
 2230 is the right form factor for this: the drive plus enclosure is roughly the
 size of a USB stick, so a shelf of ten cartridges takes almost no room. 128 GB
@@ -201,18 +201,25 @@ path on the cartridge.
 
 <img width="760" alt="The wizard with formatting enabled: a field asking you to type the drive's current name, with Write disabled until it matches" src="docs/wizard-format.png" />
 
-Formatting to btrfs is opt-in per cartridge and gated four ways: the target must
-be on the removable-drive allowlist the wizard re-derives itself, it must not be
-the system drive, you must type the drive's **current** name back exactly, and
+Formatting is opt-in per cartridge and gated four ways: the target must be on
+the removable-drive allowlist the wizard re-derives itself, it must not be the
+system drive, you must type the drive's **current** name back exactly, and
 Write stays disabled until you have. The backend re-checks all of it — it never
 trusts the window's idea of where to write.
 
-btrfs enables two optimisations over exFAT: TRIM support (`discard=async` mount
-option) keeps the NVMe drive healthy over time, and transparent zstd compression
-(`compress=zstd` mount option) squeezes extra effective capacity out of
-compressible game data. On Linux these mount options are set by the desktop
-environment or `/etc/fstab`. On Windows, [WinBtrfs](https://github.com/maharmstone/btrfs)
-must be installed before a btrfs cartridge can be read or written.
+The wizard now offers **btrfs** and **exFAT**:
+
+- **btrfs** is the better fit for NVMe cartridges. TRIM (`discard=async`) helps
+  drive longevity, and transparent zstd compression (`compress=zstd`) can
+  stretch effective capacity on compressible game data. On Windows,
+  [WinBtrfs](https://github.com/maharmstone/btrfs) must be installed before a
+  btrfs cartridge can be read or written.
+- **exFAT** is the compatibility option. It is the better choice when the goal
+  is broad removable-media support rather than squeezing the most out of an NVMe
+  cartridge.
+
+On Linux the relevant mount options are set by the desktop environment or
+`/etc/fstab`.
 
 ## Cartridge format
 
