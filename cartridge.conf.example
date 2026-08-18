@@ -6,6 +6,11 @@
 # When the drive is plugged in, the launcher reads this, shows the cover art and
 # the title, and waits. Nothing runs until you press Play.
 #
+# There are two formats: single-game (simple key=value) and multi-game bundle
+# (uses [collection] + [game] sections).
+#
+# ===== Single-game format =====
+#
 # ----- Keys -----
 #
 # executable  (required)
@@ -41,3 +46,37 @@ cover=cover.jpg
 #
 # A native Linux game on the cartridge
 #   executable=Game/bin/start.sh
+#
+#
+# ===== Multi-game bundle format =====
+#
+# A [collection] section defines the overall cartridge metadata (required).
+# Each [game] section defines one game (at least two needed for bundle mode).
+#
+# [collection] keys:
+#   title  - Collection name shown in the launcher (required)
+#   cover  - Collection cover art, relative to this file (optional)
+#
+# [game] keys:
+#   title       - Game name shown in the game list (required)
+#   executable  - What Play should start for this game (required)
+#   cover       - Per-game thumbnail, relative to this file (optional)
+#
+# ----- Bundle example -----
+#
+# [collection]
+# title=God of War Collection
+# cover=collection.jpg
+#
+# [game]
+# title=God of War (2018)
+# executable=steam://rungameid/310970
+# cover=cover_0.jpg
+#
+# [game]
+# title=God of War Ragnarök
+# executable=steam://rungameid/2322010
+# cover=cover_1.jpg
+#
+# Steam games are stored under steamapps/ as usual.
+# GOG / other games are stored under Games/<Title>/ for organisation.
