@@ -44,6 +44,7 @@ impl Filesystem {
         }
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))]
     fn display_name(self) -> &'static str {
         match self {
             Self::Btrfs => "btrfs",
