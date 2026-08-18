@@ -37,7 +37,7 @@ Surface tablets — in compact aluminium USB enclosures.
 
 | | |
 |---|---|
-| **Drives** | 10 × 128 GB M.2 2230 NVMe |
+| **Drives** | 128 GB M.2 2230 NVMe |
 | **Enclosures** | ITGZ aluminium compact M.2 2230 case, USB 3.2 Gen 2 (10 Gbps), passive auto-cooling |
 | **Filesystem** | exFAT, so a cartridge works on both Windows and Linux |
 
