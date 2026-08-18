@@ -95,7 +95,8 @@
 /* --- Search ------------------------------------------------------------- */
 
 #search,
-.field input {
+.field input,
+.field select {
   font-family: inherit;
   font-size: 13px;
   color: var(--ink);
@@ -113,7 +114,8 @@
 }
 
 #search:focus,
-.field input:focus {
+.field input:focus,
+.field select:focus {
   outline: none;
   border-color: color-mix(in oklch, var(--accent) 60%, transparent);
 }
@@ -311,6 +313,14 @@ li:last-child .row {
   overflow-wrap: anywhere;
 }
 
+#preview-source {
+  margin: 7px 0 0;
+}
+
+#btn-sgdb {
+  margin-top: 8px;
+}
+
 /* --- Manual entry ------------------------------------------------------- */
 
 #custom {
@@ -498,6 +508,11 @@ li:last-child .row {
   flex: 1;
 }
 
+.btn--tiny {
+  min-height: 30px;
+  padding: 0 10px;
+}
+
 #status {
   margin: 12px 0 0;
   min-height: 1.4em;
@@ -544,6 +559,80 @@ li:last-child .row {
 #exe-choices:focus {
   outline: none;
   border-color: color-mix(in oklch, var(--accent) 60%, transparent);
+}
+
+/* --- SteamGridDB dialog --------------------------------------------------- */
+
+#sgdb-dialog {
+  width: min(720px, 90vw);
+  border: 1px solid var(--hairline-soft);
+  border-radius: 8px;
+  padding: 0;
+  color: var(--ink);
+  background: linear-gradient(200deg, var(--panel) 0%, var(--shell) 100%);
+}
+
+#sgdb-dialog::backdrop {
+  background: oklch(0 0 0 / 0.6);
+}
+
+#sgdb-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.sgdb-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sgdb-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+#sgdb-results {
+  min-height: 220px;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 6px;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.sgdb-card {
+  border: 1px solid var(--hairline-soft);
+  border-radius: 6px;
+  padding: 4px;
+  background: oklch(0 0 0 / 0.2);
+  color: inherit;
+  cursor: pointer;
+}
+
+.sgdb-card img {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: 4px;
+  display: block;
+}
+
+.sgdb-card span {
+  display: block;
+  margin-top: 4px;
+  font-size: 9.5px;
+  color: var(--ink-3);
+}
+
+.sgdb-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 /* --- Bundle panel -------------------------------------------------------- */

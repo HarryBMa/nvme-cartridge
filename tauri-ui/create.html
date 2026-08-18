@@ -78,6 +78,10 @@
             <p class="eyebrow">Selected</p>
             <h3 id="preview-title">Nothing yet</h3>
             <p id="preview-sub" class="mono"></p>
+            <p id="preview-source" class="field__hint" hidden>From SteamGridDB</p>
+            <button id="btn-sgdb" class="btn btn--ghost btn--tiny" type="button" disabled>
+              <span class="btn__label">Search SteamGridDB</span>
+            </button>
           </div>
         </div>
 
@@ -175,6 +179,38 @@
       </section>
     </div>
   </main>
+
+  <dialog id="sgdb-dialog">
+    <form id="sgdb-form" method="dialog">
+      <header class="sgdb-head">
+        <h3>SteamGridDB artwork</h3>
+        <button id="sgdb-close" class="icon-btn" type="submit" value="cancel" aria-label="Close">✕</button>
+      </header>
+      <label class="field">
+        <span class="field__label">Search title</span>
+        <input id="sgdb-search" type="search" placeholder="Game title" autocomplete="off" />
+      </label>
+      <label class="field">
+        <span class="field__label">Artwork type</span>
+        <select id="sgdb-type">
+          <option value="grid">Grid</option>
+          <option value="logo">Logo</option>
+          <option value="cover" selected>Cover/Poster</option>
+        </select>
+      </label>
+      <p id="sgdb-status" class="field__hint"></p>
+      <div id="sgdb-results" aria-live="polite"></div>
+      <label class="field">
+        <span class="field__label">Or paste artwork URL</span>
+        <input id="sgdb-manual-url" type="url" placeholder="https://..." autocomplete="off" spellcheck="false" />
+      </label>
+      <footer class="sgdb-actions">
+        <button id="sgdb-use-manual" class="btn btn--ghost" type="button">
+          <span class="btn__label">Use URL</span>
+        </button>
+      </footer>
+    </form>
+  </dialog>
 
   <script type="module" src="src/create.js"></script>
 </body>
