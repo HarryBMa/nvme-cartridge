@@ -14,6 +14,10 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+// Only the Windows arm logs; on other targets the module is compiled but unused.
+#[cfg_attr(not(windows), allow(dead_code))]
+mod log;
+
 #[cfg(not(windows))]
 fn main() {
     eprintln!(
@@ -81,6 +85,8 @@ mod windows_watcher {
     static mut SEEN: Option<HashMap<char, Instant>> = None;
 
     pub fn run() {
+        crate::log::line("watcher starting");
+
         // SAFETY: set up before the window exists, so before any message can be
         // dispatched. The message loop is single-threaded, so SEEN is only ever
         // touched from this thread.
@@ -109,6 +115,7 @@ mod windows_watcher {
             };
 
             if RegisterClassW(&class) == 0 {
+                crate::log::line("could not register the window class; giving up");
                 return;
             }
 
@@ -129,8 +136,11 @@ mod windows_watcher {
         };
 
         if hwnd == 0 {
+            crate::log::line("could not create the listener window; giving up");
             return;
         }
+
+        crate::log::line("listening for volume arrivals");
 
         // Blocks here for the rest of the session. GetMessageW sleeps in the
         // kernel until something arrives, so idle CPU is exactly zero.
@@ -192,6 +202,7 @@ mod windows_watcher {
 
         if let Some(last) = seen.get(&letter) {
             if now.duration_since(*last) < DEBOUNCE {
+                crate::log::line(&format!("{letter}: ignoring repeat arrival"));
                 return;
             }
         }
@@ -201,11 +212,17 @@ mod windows_watcher {
         // Not every drive is a cartridge. Without this check the launcher would
         // pop up for every USB stick and phone the user plugs in.
         if !is_cartridge(&root) {
+            crate::log::line(&format!(
+                "{letter}: no cartridge.conf or autorun.inf at the root; ignoring"
+            ));
             return;
         }
 
         seen.insert(letter, now);
-        let _ = start_launcher(&root);
+        match start_launcher(&root) {
+            Ok(()) => crate::log::line(&format!("{letter}: opened the launcher")),
+            Err(e) => crate::log::line(&format!("{letter}: could not start the launcher: {e}")),
+        }
     }
 
     /// A cartridge is a volume with a manifest at its root. Retried briefly:
@@ -243,7 +260,10 @@ mod windows_watcher {
     }
 
     fn wide(s: &str) -> Vec<u16> {
-        OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+        OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
     }
 
     #[cfg(test)]

@@ -124,6 +124,14 @@ left to itself the wordmark would render in whatever the build machine had.
 There is no `.icns`, so `bundle.targets` lists the Windows and Linux bundles
 only.
 
+## When nothing happens
+
+The Windows watcher writes to
+`%LOCALAPPDATA%\PC-Cartridge-System\watcher.log`, which is the first place to
+look when a cartridge does not open the launcher — it records every volume
+arrival and why each one was or was not acted on. The Linux helper logs to
+`~/.local/state/pc-cartridge-system/helper.log`.
+
 ## How it gets started
 
 The launcher takes the cartridge's mount point on the command line and shows one
@@ -184,15 +192,23 @@ tauri-ui/
 │   │   ├── icon.svg            #   full mark (source)
 │   │   └── icon-small.svg      #   simplified mark for <=48px (source)
 │   └── src/
-│       ├── main.rs             # commands, window construction
-│       ├── playnite.rs         # Playnite library import
-│       ├── steam.rs            # Steam manifests and library folders
-│       ├── steamlib.rs         # copy a game, register with Steam
-│       ├── drives.rs           # which drives may be written to
-│       ├── format.rs           # exFAT formatting, behind confirmation
-│       ├── autorun.rs          # autorun.inf, drive name and icon
-│       └── create.rs           # the build pipeline
+│       └── main.rs             # commands and window construction only
 └── package.json
+```
+
+The logic behind those commands lives in the `cartridge-core` crate at `core/`,
+which has no UI dependency so its tests run without a webview:
+
+```
+core/src/
+├── cartridge.rs   reading a cartridge: manifest, cover, holds_game
+├── playnite.rs    Playnite library import
+├── steam.rs       Steam manifests and library folders
+├── steamlib.rs    copy a game, register/unregister with Steam
+├── drives.rs      which drives may be written to
+├── format.rs      exFAT formatting, behind confirmation
+├── autorun.rs     autorun.inf, drive name and icon
+└── create.rs      the build pipeline
 ```
 
 ## Security note

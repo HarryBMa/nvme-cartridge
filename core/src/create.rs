@@ -255,6 +255,23 @@ pub fn target_drives() -> Vec<TargetDrive> {
     drives::list_drives()
 }
 
+/// Whether this drive is currently listed as a Steam library folder.
+pub fn steam_registration(drive_path: &str) -> bool {
+    steam::steam_root()
+        .map(|root| steamlib::is_registered(&root, Path::new(drive_path)))
+        .unwrap_or(false)
+}
+
+/// Take a cartridge back out of Steam's library list.
+///
+/// For a cartridge that has been reformatted or repurposed. Entries are never
+/// removed automatically — a cartridge is meant to spend most of its life
+/// unplugged, so a missing folder is normal rather than stale.
+pub fn unregister_from_steam(drive_path: &str) -> Result<bool, String> {
+    let root = steam::steam_root().ok_or_else(|| "Could not find Steam.".to_string())?;
+    steamlib::unregister_library(&root, Path::new(drive_path)).map_err(|e| e.to_string())
+}
+
 /// Describe what formatting a drive would destroy.
 pub fn format_plan(path: &str) -> Result<format::FormatPlan, String> {
     format::plan(path).map_err(|e| e.to_string())
@@ -409,7 +426,8 @@ fn copy_steam_game(
         return Ok(None);
     };
 
-    let steam_root = steam::steam_root().ok_or_else(|| steamlib::LibraryError::SteamNotFound.to_string())?;
+    let steam_root =
+        steam::steam_root().ok_or_else(|| steamlib::LibraryError::SteamNotFound.to_string())?;
 
     // Steam rewrites libraryfolders.vdf from memory when it exits, so a
     // registration made now would be silently undone.
@@ -433,7 +451,11 @@ fn copy_steam_game(
         .map(|d| d.free_bytes)
         .unwrap_or(0);
     if total > free {
-        return Err(steamlib::LibraryError::NotEnoughSpace { needed: total, free }.to_string());
+        return Err(steamlib::LibraryError::NotEnoughSpace {
+            needed: total,
+            free,
+        }
+        .to_string());
     }
 
     let install_dir_name = game
@@ -691,7 +713,10 @@ fn read_as_data_uri(path: &Path) -> Option<String> {
         "bmp" => "image/bmp",
         _ => "image/jpeg",
     };
-    Some(format!("data:{mime};base64,{}", crate::base64_encode(&bytes)))
+    Some(format!(
+        "data:{mime};base64,{}",
+        crate::cartridge::base64_encode(&bytes)
+    ))
 }
 
 #[cfg(test)]
@@ -710,8 +735,11 @@ mod tests {
 
     #[test]
     fn renders_a_conf_that_round_trips() {
-        let conf =
-            render_cartridge_conf("Hollow Knight", "steam://rungameid/367520", Some("cover.jpg"));
+        let conf = render_cartridge_conf(
+            "Hollow Knight",
+            "steam://rungameid/367520",
+            Some("cover.jpg"),
+        );
         assert!(conf.contains("title=Hollow Knight\n"));
         assert!(conf.contains("executable=steam://rungameid/367520\n"));
         assert!(conf.contains("cover=cover.jpg\n"));

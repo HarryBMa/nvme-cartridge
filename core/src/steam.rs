@@ -476,18 +476,20 @@ mod tests {
 
     #[test]
     fn a_missing_name_still_yields_a_usable_entry() {
-        let game =
-            game_from_manifest(r#""AppState" { "appid" "7" "StateFlags" "4" }"#, Path::new("/x"))
-                .unwrap();
+        let game = game_from_manifest(
+            r#""AppState" { "appid" "7" "StateFlags" "4" }"#,
+            Path::new("/x"),
+        )
+        .unwrap();
         assert_eq!(game.name, "Unknown game");
     }
 
     #[test]
     fn reads_modern_library_folders() {
-        let dir = tmp("libs-modern");
-        std::fs::create_dir_all(dir.join("steamapps")).unwrap();
+        let scratch = crate::testutil::Scratch::new("libs-modern");
+        std::fs::create_dir_all(scratch.join("steamapps")).unwrap();
         std::fs::write(
-            dir.join("steamapps/libraryfolders.vdf"),
+            scratch.join("steamapps/libraryfolders.vdf"),
             r#"
 "libraryfolders"
 {
@@ -510,49 +512,49 @@ mod tests {
         )
         .unwrap();
 
-        let libs = library_paths(&dir);
-        assert!(libs.contains(&dir.join("steamapps")));
+        let libs = library_paths(scratch.path());
+        assert!(libs.contains(&scratch.join("steamapps")));
         assert!(libs.contains(&PathBuf::from("/home/harry/.local/share/Steam/steamapps")));
         assert!(libs.contains(&PathBuf::from("/mnt/games/SteamLibrary/steamapps")));
-        clean(&dir);
     }
 
     #[test]
     fn reads_the_ancient_flat_library_format() {
-        let dir = tmp("libs-old");
-        std::fs::create_dir_all(dir.join("steamapps")).unwrap();
+        let scratch = crate::testutil::Scratch::new("libs-old");
+        std::fs::create_dir_all(scratch.join("steamapps")).unwrap();
         std::fs::write(
-            dir.join("steamapps/libraryfolders.vdf"),
+            scratch.join("steamapps/libraryfolders.vdf"),
             "\"LibraryFolders\"\n{\n\t\"TimeNextStatsReport\"\t\"123\"\n\t\"1\"\t\"/mnt/old/Library\"\n}\n",
         )
         .unwrap();
 
-        let libs = library_paths(&dir);
+        let libs = library_paths(scratch.path());
         assert!(libs.contains(&PathBuf::from("/mnt/old/Library/steamapps")));
         // The non-numeric bookkeeping key must not become a library path.
         assert!(!libs.iter().any(|p| p.to_string_lossy().contains("123")));
-        clean(&dir);
     }
 
     #[test]
     fn windows_paths_survive_parsing() {
         // These appear with doubled backslashes in real vdf files.
-        let kv = parse_keyvalues("\"libraryfolders\" { \"0\" { \"path\" \"D:\\\\SteamLibrary\" } }");
+        let kv =
+            parse_keyvalues("\"libraryfolders\" { \"0\" { \"path\" \"D:\\\\SteamLibrary\" } }");
         assert_eq!(
-            kv.path(&["libraryfolders", "0", "path"]).and_then(Kv::as_str),
+            kv.path(&["libraryfolders", "0", "path"])
+                .and_then(Kv::as_str),
             Some("D:\\SteamLibrary")
         );
     }
 
     #[test]
     fn enumerates_installed_games_across_libraries() {
-        let dir = tmp("games");
-        let second = dir.join("second");
-        std::fs::create_dir_all(dir.join("steamapps")).unwrap();
+        let scratch = crate::testutil::Scratch::new("games");
+        let second = scratch.join("second");
+        std::fs::create_dir_all(scratch.join("steamapps")).unwrap();
         std::fs::create_dir_all(second.join("steamapps")).unwrap();
 
         std::fs::write(
-            dir.join("steamapps/libraryfolders.vdf"),
+            scratch.join("steamapps/libraryfolders.vdf"),
             format!(
                 "\"libraryfolders\" {{ \"0\" {{ \"path\" \"{}\" }} }}",
                 second.display()
@@ -561,7 +563,7 @@ mod tests {
         .unwrap();
 
         std::fs::write(
-            dir.join("steamapps/appmanifest_2.acf"),
+            scratch.join("steamapps/appmanifest_2.acf"),
             r#""AppState" { "appid" "2" "name" "Zebra" "StateFlags" "4" }"#,
         )
         .unwrap();
@@ -576,44 +578,42 @@ mod tests {
         )
         .unwrap();
         // Not a manifest; must be ignored.
-        std::fs::write(dir.join("steamapps/readme.txt"), "hello").unwrap();
+        std::fs::write(scratch.join("steamapps/readme.txt"), "hello").unwrap();
 
-        let games = installed_games(&dir);
+        let games = installed_games(scratch.path());
         // Sorted case-insensitively by name, incomplete install excluded.
         assert_eq!(
             games.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(),
             vec!["apple", "Zebra"]
         );
-        clean(&dir);
     }
 
     #[test]
     fn finds_cover_art_in_both_cache_layouts() {
-        let dir = tmp("covers");
-        let flat = dir.join("appcache/librarycache");
+        let scratch = crate::testutil::Scratch::new("covers");
+        let flat = scratch.join("appcache/librarycache");
         std::fs::create_dir_all(flat.join("367520")).unwrap();
         std::fs::write(flat.join("367520/library_600x900.jpg"), b"x").unwrap();
         assert_eq!(
-            find_cover(&dir, "367520"),
+            find_cover(scratch.path(), "367520"),
             Some(flat.join("367520/library_600x900.jpg"))
         );
 
         // The 2x variant wins when both exist.
         std::fs::write(flat.join("367520/library_600x900_2x.jpg"), b"x").unwrap();
         assert_eq!(
-            find_cover(&dir, "367520"),
+            find_cover(scratch.path(), "367520"),
             Some(flat.join("367520/library_600x900_2x.jpg"))
         );
 
         // Older flat naming.
         std::fs::write(flat.join("99_library_600x900.jpg"), b"x").unwrap();
         assert_eq!(
-            find_cover(&dir, "99"),
+            find_cover(scratch.path(), "99"),
             Some(flat.join("99_library_600x900.jpg"))
         );
 
-        assert_eq!(find_cover(&dir, "12345"), None);
-        clean(&dir);
+        assert_eq!(find_cover(scratch.path(), "12345"), None);
     }
 
     #[test]
@@ -621,9 +621,15 @@ mod tests {
         let kv = parse_keyvalues(
             "// leading comment\n\"AppState\"\n{\n\t\"appid\" \"1\" // trailing\n\t\"name\" \"A/B\"\n}\n",
         );
-        assert_eq!(kv.path(&["AppState", "appid"]).and_then(Kv::as_str), Some("1"));
+        assert_eq!(
+            kv.path(&["AppState", "appid"]).and_then(Kv::as_str),
+            Some("1")
+        );
         // A single slash is data, not a comment.
-        assert_eq!(kv.path(&["AppState", "name"]).and_then(Kv::as_str), Some("A/B"));
+        assert_eq!(
+            kv.path(&["AppState", "name"]).and_then(Kv::as_str),
+            Some("A/B")
+        );
     }
 
     #[test]
@@ -646,18 +652,4 @@ mod tests {
     }
 
     // ---- helpers ----
-
-    fn tmp(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "steam-test-{}-{tag}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn clean(dir: &Path) {
-        std::fs::remove_dir_all(dir).ok();
-    }
 }

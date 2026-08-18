@@ -101,9 +101,21 @@ impl Number {
 
 #[derive(Debug, Deserialize)]
 struct RawGame {
-    #[serde(default, alias = "id", alias = "Id", alias = "gameId", alias = "GameId")]
+    #[serde(
+        default,
+        alias = "id",
+        alias = "Id",
+        alias = "gameId",
+        alias = "GameId"
+    )]
     id: Option<String>,
-    #[serde(default, alias = "name", alias = "Name", alias = "title", alias = "Title")]
+    #[serde(
+        default,
+        alias = "name",
+        alias = "Name",
+        alias = "title",
+        alias = "Title"
+    )]
     name: Option<String>,
     #[serde(default, alias = "source", alias = "Source")]
     source: Option<Named>,
@@ -119,11 +131,22 @@ struct RawGame {
         alias = "InstallDir"
     )]
     install_directory: Option<String>,
-    #[serde(default, alias = "coverImage", alias = "CoverImage", alias = "cover", alias = "Cover")]
+    #[serde(
+        default,
+        alias = "coverImage",
+        alias = "CoverImage",
+        alias = "cover",
+        alias = "Cover"
+    )]
     cover_image: Option<String>,
     #[serde(default, alias = "icon", alias = "Icon")]
     icon: Option<String>,
-    #[serde(default, alias = "isInstalled", alias = "IsInstalled", alias = "installed")]
+    #[serde(
+        default,
+        alias = "isInstalled",
+        alias = "IsInstalled",
+        alias = "installed"
+    )]
     is_installed: Option<bool>,
     #[serde(default, alias = "playtime", alias = "Playtime")]
     playtime: Option<Number>,
@@ -170,10 +193,18 @@ pub fn parse_export(json: &str) -> Result<Vec<PlayniteGame>, ImportError> {
     for game in raw {
         // Without an id there is nothing to launch, and without a name there is
         // nothing to show, so those two are the only hard requirements.
-        let Some(id) = game.id.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) else {
+        let Some(id) = game
+            .id
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        else {
             continue;
         };
-        let Some(name) = game.name.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) else {
+        let Some(name) = game
+            .name
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        else {
             continue;
         };
         if game.hidden.unwrap_or(false) {
@@ -279,7 +310,9 @@ pub fn playnite_root() -> Option<PathBuf> {
         }
     }
 
-    candidates.into_iter().find(|p| p.join("library").is_dir() || p.is_dir())
+    candidates
+        .into_iter()
+        .find(|p| p.join("library").is_dir() || p.is_dir())
 }
 
 /// Where a library export is likely to be.
@@ -337,7 +370,11 @@ pub fn resolve_cover(root: &Path, cover: &str) -> Option<PathBuf> {
     // when the wizard is run on Linux against a Proton prefix.
     let normalised: PathBuf = cover.split(['\\', '/']).filter(|s| !s.is_empty()).collect();
 
-    for base in [root.join("library/files"), root.join("library"), root.to_path_buf()] {
+    for base in [
+        root.join("library/files"),
+        root.join("library"),
+        root.to_path_buf(),
+    ] {
         let candidate = base.join(&normalised);
         if candidate.is_file() {
             return Some(candidate);
@@ -437,8 +474,8 @@ mod tests {
 
     #[test]
     fn a_playtime_string_is_still_a_number() {
-        let games =
-            parse_export(r#"[{"Id":"1","Name":"A","IsInstalled":true,"Playtime":"3600"}]"#).unwrap();
+        let games = parse_export(r#"[{"Id":"1","Name":"A","IsInstalled":true,"Playtime":"3600"}]"#)
+            .unwrap();
         assert_eq!(games[0].playtime, 3600);
     }
 
@@ -457,16 +494,18 @@ mod tests {
 
     #[test]
     fn an_icon_stands_in_for_a_missing_cover() {
-        let games = parse_export(
-            r#"[{"Id":"1","Name":"A","IsInstalled":true,"Icon":"1\\icon.png"}]"#,
-        )
-        .unwrap();
+        let games =
+            parse_export(r#"[{"Id":"1","Name":"A","IsInstalled":true,"Icon":"1\\icon.png"}]"#)
+                .unwrap();
         assert_eq!(games[0].cover.as_deref(), Some("1\\icon.png"));
     }
 
     #[test]
     fn reports_useful_errors() {
-        assert!(matches!(parse_export("not json"), Err(ImportError::Json(_))));
+        assert!(matches!(
+            parse_export("not json"),
+            Err(ImportError::Json(_))
+        ));
         assert!(matches!(parse_export("[]"), Err(ImportError::Empty)));
         assert!(matches!(
             parse_export(r#"[{"Id":"1","Name":"A","IsInstalled":false}]"#),
@@ -476,40 +515,36 @@ mod tests {
 
     #[test]
     fn resolves_covers_including_windows_separators() {
-        let dir = std::env::temp_dir().join(format!("playnite-{}", std::process::id()));
-        let files = dir.join("library/files/abc");
+        let scratch = crate::testutil::Scratch::new("playnite");
+        let files = scratch.join("library/files/abc");
         std::fs::create_dir_all(&files).unwrap();
         std::fs::write(files.join("cover.jpg"), b"x").unwrap();
 
         assert_eq!(
-            resolve_cover(&dir, "abc\\cover.jpg"),
+            resolve_cover(scratch.path(), "abc\\cover.jpg"),
             Some(files.join("cover.jpg"))
         );
         assert_eq!(
-            resolve_cover(&dir, "abc/cover.jpg"),
+            resolve_cover(scratch.path(), "abc/cover.jpg"),
             Some(files.join("cover.jpg"))
         );
-        assert_eq!(resolve_cover(&dir, "abc\\missing.jpg"), None);
-        assert_eq!(resolve_cover(&dir, ""), None);
-
-        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(resolve_cover(scratch.path(), "abc\\missing.jpg"), None);
+        assert_eq!(resolve_cover(scratch.path(), ""), None);
     }
 
     #[test]
     fn finds_exports_inside_extension_data_folders() {
-        let dir = std::env::temp_dir().join(format!("playnite-exp-{}", std::process::id()));
-        let ext = dir.join("ExtensionsData/66b8eca4-3f39-4b79-a359-3cb98d5b18fd");
+        let scratch = crate::testutil::Scratch::new("playnite-exp");
+        let ext = scratch.join("ExtensionsData/66b8eca4-3f39-4b79-a359-3cb98d5b18fd");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(ext.join("library.json"), b"[]").unwrap();
         std::fs::write(ext.join("settings.dat"), b"x").unwrap();
-        std::fs::write(dir.join("library.json"), b"[]").unwrap();
+        std::fs::write(scratch.join("library.json"), b"[]").unwrap();
 
-        let found = find_exports(&dir);
-        assert!(found.contains(&dir.join("library.json")));
+        let found = find_exports(scratch.path());
+        assert!(found.contains(&scratch.join("library.json")));
         assert!(found.contains(&ext.join("library.json")));
         // Non-JSON files are not exports.
         assert!(!found.iter().any(|p| p.ends_with("settings.dat")));
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -9,13 +9,11 @@ license = "MIT"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+cartridge-core = { path = "../../core" }
 # No "protocol-asset": the cover is handed to the webview as a data URI, so the
 # asset protocol stays switched off (see tauri.conf.json).
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
-# Back for the Playnite importer: its library is a LiteDB file, so the wizard
-# reads a JSON export instead.
-serde_json = "1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = [

@@ -126,11 +126,7 @@ pub fn plan(path: &str) -> Result<FormatPlan, FormatError> {
 /// `confirmation` must equal the drive's current label. That is the gate: it
 /// forces the user to look at which drive they picked, rather than clicking
 /// through a dialog.
-pub fn format_exfat(
-    path: &str,
-    new_label: &str,
-    confirmation: &str,
-) -> Result<(), FormatError> {
+pub fn format_exfat(path: &str, new_label: &str, confirmation: &str) -> Result<(), FormatError> {
     let plan = plan(path)?;
     let label = check_label(new_label)?;
 
@@ -331,7 +327,10 @@ mod tests {
             "semi;colon",
             "new\nline",
         ] {
-            assert!(matches!(check_label(bad), Err(FormatError::BadLabel(_))), "{bad:?}");
+            assert!(
+                matches!(check_label(bad), Err(FormatError::BadLabel(_))),
+                "{bad:?}"
+            );
         }
         // Exactly at the limit is fine; one over is not.
         assert!(check_label("ELEVENCHARS").is_ok());
@@ -345,7 +344,10 @@ mod tests {
         for path in ["/", "/home", "/etc", "/usr/local", "/media", ""] {
             let err = plan(path).unwrap_err();
             assert!(
-                matches!(err, FormatError::NotRemovable(_) | FormatError::SystemDrive(_)),
+                matches!(
+                    err,
+                    FormatError::NotRemovable(_) | FormatError::SystemDrive(_)
+                ),
                 "{path} gave {err:?}"
             );
         }

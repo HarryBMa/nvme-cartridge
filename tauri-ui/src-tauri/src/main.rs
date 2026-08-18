@@ -19,6 +19,8 @@
 //   game_cover(library, id)                  -> String (data URI)
 //   list_target_drives()                     -> Vec<TargetDrive>
 //   format_plan(drive_path)                  -> FormatPlan
+//   steam_registration(drive_path)           -> bool
+//   unregister_from_steam(drive_path)        -> bool
 //   create_cartridge(request)                -> CartridgeResult,
 //                                               emitting cartridge://progress
 //
@@ -29,259 +31,14 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod autorun;
-mod create;
-mod drives;
-mod format;
-mod playnite;
-mod steam;
-mod steamlib;
+// All of the real work lives in cartridge-core, which has no UI dependency and
+// so can be tested without a webview. This file is the Tauri shell around it.
+use cartridge_core::cartridge::{self, CartridgeInfo};
+use cartridge_core::{create, drives, format};
 
-use serde::Serialize;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::{Emitter, WebviewUrl, WebviewWindowBuilder};
-
-// --------------------------------------------------------------------------
-// Data types
-// --------------------------------------------------------------------------
-
-#[derive(Serialize, Clone)]
-pub struct CartridgeInfo {
-    /// Display title of the game / cartridge.
-    title: String,
-    /// Absolute path to the cover image, or empty string if none. Shown in the
-    /// details sheet; never sent back to the backend.
-    cover_path: String,
-    /// The cover as a `data:` URI, or empty string if there is none.
-    ///
-    /// Inlined rather than served over the asset protocol: cartridge mount
-    /// points are arbitrary, so a scope wide enough to serve them would be wide
-    /// enough to serve anything on the machine.
-    cover: String,
-    /// The value from the `executable` / `open` key — either a URI or a
-    /// relative path on the cartridge.
-    executable: String,
-    /// The root path of the cartridge drive as supplied by the caller.
-    drive_path: String,
-}
-
-/// Largest cover we will base64 into the webview. A cartridge is not a trusted
-/// input, and a 200 MB "cover" should fail rather than be inlined.
-const MAX_COVER_BYTES: u64 = 8 * 1024 * 1024;
-
-// --------------------------------------------------------------------------
-// Inline INI / conf file parser
-//
-// Handles both Windows autorun.inf ([section] key=value) and our flat
-// cartridge.conf (key=value, no sections required).
-// --------------------------------------------------------------------------
-
-type IniMap = HashMap<String, HashMap<String, String>>;
-
-fn parse_ini(content: &str) -> IniMap {
-    let mut map: IniMap = HashMap::new();
-    let mut current_section = String::from("general");
-
-    for raw_line in content.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
-            continue;
-        }
-        if line.starts_with('[') {
-            if let Some(end) = line.find(']') {
-                current_section = line[1..end].trim().to_lowercase();
-            }
-            continue;
-        }
-        if let Some(eq) = line.find('=') {
-            let key = line[..eq].trim().to_lowercase();
-            let val = line[eq + 1..].trim().to_string();
-            map.entry(current_section.clone())
-                .or_default()
-                .insert(key, val);
-        }
-    }
-    map
-}
-
-fn ini_get<'a>(map: &'a IniMap, section: &str, key: &str) -> Option<&'a String> {
-    map.get(section)?.get(key)
-}
-
-// --------------------------------------------------------------------------
-// Helper: read cartridge metadata
-//
-// Priority:
-//   1. cartridge.conf  (our own flat format, section "general" or none)
-//   2. autorun.inf     (classic Windows autorun, section [autorun])
-// --------------------------------------------------------------------------
-
-fn read_cartridge_info(drive_path: &str) -> Result<CartridgeInfo, String> {
-    let root = Path::new(drive_path);
-
-    // ---- Try cartridge.conf first ----
-    let conf_path = root.join("cartridge.conf");
-    if conf_path.exists() {
-        let content = std::fs::read_to_string(&conf_path)
-            .map_err(|e| format!("Failed to read cartridge.conf: {e}"))?;
-
-        let ini = parse_ini(&content);
-
-        // cartridge.conf may have no section header — values land in "general"
-        let executable = ini_get(&ini, "general", "executable")
-            .cloned()
-            .unwrap_or_default();
-
-        let title = ini_get(&ini, "general", "title")
-            .cloned()
-            .unwrap_or_else(|| "Unknown Game".to_string());
-
-        let cover_rel = ini_get(&ini, "general", "cover").cloned().unwrap_or_default();
-        let cover_path = resolve_cover(root, &cover_rel);
-
-        return Ok(CartridgeInfo {
-            title,
-            cover: cover_as_data_uri(&cover_path),
-            cover_path,
-            executable,
-            drive_path: drive_path.to_string(),
-        });
-    }
-
-    // ---- Fall back to autorun.inf ----
-    let autorun_path = root.join("autorun.inf");
-    if autorun_path.exists() {
-        let content = std::fs::read_to_string(&autorun_path)
-            .map_err(|e| format!("Failed to read autorun.inf: {e}"))?;
-
-        let ini = parse_ini(&content);
-
-        let executable = ini_get(&ini, "autorun", "open")
-            .or_else(|| ini_get(&ini, "autorun", "shellexecute"))
-            .cloned()
-            .unwrap_or_default();
-
-        let title = ini_get(&ini, "autorun", "label")
-            .cloned()
-            .unwrap_or_else(|| "Unknown Game".to_string());
-
-        let icon_rel = ini_get(&ini, "autorun", "icon").cloned().unwrap_or_default();
-        let cover_path = resolve_cover(root, &icon_rel);
-
-        return Ok(CartridgeInfo {
-            title,
-            cover: cover_as_data_uri(&cover_path),
-            cover_path,
-            executable,
-            drive_path: drive_path.to_string(),
-        });
-    }
-
-    Err(format!(
-        "No cartridge.conf or autorun.inf found in {drive_path}"
-    ))
-}
-
-/// Resolve a relative cover image path, falling back to common filenames.
-fn resolve_cover(root: &Path, rel: &str) -> String {
-    if !rel.is_empty() {
-        if let Some(p) = join_within(root, rel) {
-            if p.is_file() {
-                return p.to_string_lossy().to_string();
-            }
-        }
-    }
-    find_cover_image(root)
-}
-
-/// Join a cartridge-supplied relative path onto the drive root, refusing
-/// anything that would leave the drive.
-///
-/// `cover=` comes out of a file on a volume someone else may have written, so
-/// `..\..\Users\me\.ssh\id_rsa` has to be rejected rather than read and handed
-/// to the webview.
-fn join_within(root: &Path, rel: &str) -> Option<PathBuf> {
-    use std::path::Component;
-
-    let candidate = Path::new(rel);
-    // Absolute paths and drive-qualified paths (`C:\…`) are never relative to
-    // this cartridge.
-    if candidate.is_absolute() || rel.contains(':') {
-        return None;
-    }
-
-    let mut out = PathBuf::new();
-    for component in candidate.components() {
-        match component {
-            Component::Normal(part) => out.push(part),
-            Component::CurDir => {}
-            // Any climb out, and any root or drive prefix, disqualifies it.
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
-        }
-    }
-    if out.as_os_str().is_empty() {
-        return None;
-    }
-    Some(root.join(out))
-}
-
-/// Read a cover image and encode it as a `data:` URI. Any failure yields an
-/// empty string: a missing or oversized cover is not a reason to refuse the
-/// cartridge, the placeholder just stays.
-fn cover_as_data_uri(path: &str) -> String {
-    if path.is_empty() {
-        return String::new();
-    }
-    let p = Path::new(path);
-    match std::fs::metadata(p) {
-        Ok(meta) if meta.len() > MAX_COVER_BYTES => return String::new(),
-        Ok(_) => {}
-        Err(_) => return String::new(),
-    }
-    let Ok(bytes) = std::fs::read(p) else {
-        return String::new();
-    };
-
-    let mime = match p
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase()
-        .as_str()
-    {
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "avif" => "image/avif",
-        "ico" => "image/x-icon",
-        _ => "image/png",
-    };
-
-    format!("data:{mime};base64,{}", base64_encode(&bytes))
-}
-
-/// Look for common cover image filenames in the root of the cartridge.
-fn find_cover_image(root: &Path) -> String {
-    let candidates = [
-        "cover.png",
-        "cover.jpg",
-        "cover.jpeg",
-        "cover.webp",
-        "poster.png",
-        "poster.jpg",
-        "box.png",
-        "box.jpg",
-    ];
-    for name in &candidates {
-        let p = root.join(name);
-        if p.is_file() {
-            return p.to_string_lossy().to_string();
-        }
-    }
-    String::new()
-}
 
 // --------------------------------------------------------------------------
 // Tauri commands
@@ -290,7 +47,7 @@ fn find_cover_image(root: &Path) -> String {
 /// Parse the cartridge at `drive_path` and return metadata.
 #[tauri::command]
 fn parse_cartridge(drive_path: String) -> Result<CartridgeInfo, String> {
-    read_cartridge_info(&drive_path)
+    cartridge::read_cartridge_info(&drive_path)
 }
 
 /// The cartridge this window was started for.
@@ -300,48 +57,7 @@ fn parse_cartridge(drive_path: String) -> Result<CartridgeInfo, String> {
 /// there is nothing in the URL to read.
 #[tauri::command]
 fn drive_path() -> String {
-    drive_from_args(std::env::args().skip(1))
-}
-
-/// Pull the value of `--drive` out of an argument list.
-///
-/// Accepts `--drive X` and `--drive=X`. Returns an empty string when absent,
-/// which the frontend reports as "no cartridge" rather than guessing.
-fn drive_from_args<I: Iterator<Item = String>>(args: I) -> String {
-    let mut args = args;
-    while let Some(arg) = args.next() {
-        if arg == "--drive" {
-            return args.next().unwrap_or_default();
-        }
-        if let Some(value) = arg.strip_prefix("--drive=") {
-            return value.to_string();
-        }
-    }
-    String::new()
-}
-
-/// Minimal base64 encoder — avoids adding a `base64` crate dependency.
-pub(crate) fn base64_encode(input: &[u8]) -> String {
-    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
-    for chunk in input.chunks(3) {
-        let b0 = chunk[0] as usize;
-        let b1 = if chunk.len() > 1 { chunk[1] as usize } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as usize } else { 0 };
-        out.push(CHARS[(b0 >> 2) & 0x3F] as char);
-        out.push(CHARS[((b0 << 4) | (b1 >> 4)) & 0x3F] as char);
-        out.push(if chunk.len() > 1 {
-            CHARS[((b1 << 2) | (b2 >> 6)) & 0x3F] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            CHARS[b2 & 0x3F] as char
-        } else {
-            '='
-        });
-    }
-    out
+    cartridge::drive_from_args(std::env::args().skip(1))
 }
 
 /// Launch the game.
@@ -600,6 +316,18 @@ fn format_plan(drive_path: String) -> Result<format::FormatPlan, String> {
     create::format_plan(&drive_path)
 }
 
+/// Whether the drive is currently a registered Steam library folder.
+#[tauri::command]
+fn steam_registration(drive_path: String) -> bool {
+    create::steam_registration(&drive_path)
+}
+
+/// Remove the cartridge from Steam's library list.
+#[tauri::command]
+fn unregister_from_steam(drive_path: String) -> Result<bool, String> {
+    create::unregister_from_steam(&drive_path)
+}
+
 /// Build the cartridge, streaming progress to the window.
 ///
 /// Copying a game is minutes of work, so it runs on a blocking thread and emits
@@ -637,6 +365,8 @@ fn main() {
             game_cover,
             list_target_drives,
             format_plan,
+            steam_registration,
+            unregister_from_steam,
             create_cartridge,
         ])
         .setup(move |app| {

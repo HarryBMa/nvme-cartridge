@@ -1,0 +1,13 @@
+[package]
+name = "cartridge-core"
+version = "0.1.0"
+edition = "2021"
+description = "Cartridge logic shared by the launcher and the wizard, free of any UI"
+license = "MIT"
+
+# No Tauri, deliberately. Everything here is plain std + serde, so `cargo test`
+# runs on any machine and in CI without webkit2gtk or a display — which is the
+# whole point of the split.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

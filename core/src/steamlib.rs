@@ -112,7 +112,10 @@ pub fn register_library(steam_root: &Path, drive: &Path) -> Result<Option<PathBu
         .map_err(|e| LibraryError::Io(format!("{}: {e}", vdf.display())))?;
 
     let drive_str = drive.to_string_lossy().to_string();
-    if library_paths_in(&text).iter().any(|p| paths_match(p, &drive_str)) {
+    if library_paths_in(&text)
+        .iter()
+        .any(|p| paths_match(p, &drive_str))
+    {
         return Ok(None);
     }
 
@@ -151,11 +154,7 @@ pub fn library_paths_in(text: &str) -> Vec<String> {
 /// Compare library paths the way Steam does: separators and trailing slashes
 /// are noise, and Windows paths are case-insensitive.
 fn paths_match(a: &str, b: &str) -> bool {
-    let norm = |s: &str| {
-        s.replace('\\', "/")
-            .trim_end_matches('/')
-            .to_lowercase()
-    };
+    let norm = |s: &str| s.replace('\\', "/").trim_end_matches('/').to_lowercase();
     norm(a) == norm(b)
 }
 
@@ -170,7 +169,7 @@ pub fn append_library_entry(text: &str, drive: &str) -> String {
     let escaped = drive.replace('\\', "\\\\");
 
     let entry = format!(
-        "\t\"{next_index}\"\n\t{{\n\t\t\"path\"\t\t\"{escaped}\"\n\t\t\"label\"\t\t\"\"\n\t\t\"contentid\"\t\t\"0\"\n\t\t\"totalsize\"\t\t\"0\"\n\t\t\"apps\"\n\t\t{{\n\t\t}}\n\t}}\n"
+        "\t\"{next_index}\"\n\t{{\n\t\t\"path\"\t\t\"{escaped}\"\n\t\t\"label\"\t\t\"{CARTRIDGE_LABEL}\"\n\t\t\"contentid\"\t\t\"0\"\n\t\t\"totalsize\"\t\t\"0\"\n\t\t\"apps\"\n\t\t{{\n\t\t}}\n\t}}\n"
     );
 
     // Insert before the final closing brace of the libraryfolders block.
@@ -187,6 +186,117 @@ pub fn append_library_entry(text: &str, drive: &str) -> String {
     }
 }
 
+/// Stamped on the library entries this tool adds.
+///
+/// Steam shows it in the library-folder list, and it is how `unregister_library`
+/// knows which entries are ours. Entries are never removed automatically: a
+/// cartridge is *supposed* to be unplugged most of the time, so a missing folder
+/// is the normal state, not stale cruft.
+pub const CARTRIDGE_LABEL: &str = "PC Cartridge";
+
+/// Whether `drive` is currently listed in Steam's library folders.
+pub fn is_registered(steam_root: &Path, drive: &Path) -> bool {
+    let vdf = steam_root.join("config/libraryfolders.vdf");
+    let Ok(text) = std::fs::read_to_string(vdf) else {
+        return false;
+    };
+    let drive_str = drive.to_string_lossy().to_string();
+    library_paths_in(&text)
+        .iter()
+        .any(|p| paths_match(p, &drive_str))
+}
+
+/// Remove a cartridge from Steam's library folders.
+///
+/// Only ever called from an explicit "unregister" action — this is for a
+/// cartridge that has been reformatted or repurposed, where the entry would
+/// otherwise point at something that is never coming back.
+pub fn unregister_library(steam_root: &Path, drive: &Path) -> Result<bool, LibraryError> {
+    if steam_is_running() {
+        return Err(LibraryError::SteamRunning);
+    }
+
+    let vdf = steam_root.join("config/libraryfolders.vdf");
+    let text = std::fs::read_to_string(&vdf)
+        .map_err(|e| LibraryError::Io(format!("{}: {e}", vdf.display())))?;
+
+    let drive_str = drive.to_string_lossy().to_string();
+    let Some(updated) = remove_library_entry(&text, &drive_str) else {
+        return Ok(false);
+    };
+
+    let backup = vdf.with_extension("vdf.bak-cartridge");
+    if !backup.exists() {
+        std::fs::copy(&vdf, &backup)
+            .map_err(|e| LibraryError::Io(format!("could not back up {}: {e}", vdf.display())))?;
+    }
+    std::fs::write(&vdf, updated)
+        .map_err(|e| LibraryError::Io(format!("could not write {}: {e}", vdf.display())))?;
+    Ok(true)
+}
+
+/// Cut the entry whose `path` matches, and renumber the ones after it.
+///
+/// Text surgery rather than re-serialising the parsed tree, for the same reason
+/// as `append_library_entry`: Steam keeps per-app bookkeeping in this file that
+/// we have no business rewriting.
+pub fn remove_library_entry(text: &str, drive: &str) -> Option<String> {
+    let paths = library_paths_in(text);
+    let index = paths.iter().position(|p| paths_match(p, drive))?;
+
+    // Find the `"<index>"` key at entry level, then its brace-matched block.
+    let key = format!("\"{index}\"");
+    let key_at = text.find(&key)?;
+    let open = text[key_at..].find('{')? + key_at;
+
+    let mut depth = 0;
+    let mut close = None;
+    let bytes = text.as_bytes();
+    let mut i = open;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                // Skip string contents so braces inside them do not count.
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    let close = close?;
+
+    // Take the whole line the key sits on, through the closing brace's line.
+    let start = text[..key_at].rfind('\n').map(|n| n + 1).unwrap_or(0);
+    let end = text[close..]
+        .find('\n')
+        .map(|n| close + n + 1)
+        .unwrap_or(text.len());
+
+    let mut out = String::with_capacity(text.len());
+    out.push_str(&text[..start]);
+    out.push_str(&text[end..]);
+
+    // Renumber the entries after the hole so the keys stay sequential.
+    for old in (index + 1)..paths.len() {
+        out = out.replacen(&format!("\"{old}\"\n"), &format!("\"{}\"\n", old - 1), 1);
+    }
+    Some(out)
+}
+
 /// Whether Steam is currently running.
 pub fn steam_is_running() -> bool {
     #[cfg(windows)]
@@ -194,7 +304,11 @@ pub fn steam_is_running() -> bool {
         std::process::Command::new("tasklist")
             .args(["/FI", "IMAGENAME eq steam.exe", "/NH"])
             .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase().contains("steam.exe"))
+            .map(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .to_lowercase()
+                    .contains("steam.exe")
+            })
             .unwrap_or(false)
     }
     #[cfg(not(windows))]
@@ -211,11 +325,7 @@ pub fn steam_is_running() -> bool {
 ///
 /// A game is tens of gigabytes, so the callback lets the window show progress
 /// instead of appearing to hang.
-pub fn copy_tree(
-    from: &Path,
-    to: &Path,
-    progress: &mut dyn FnMut(u64),
-) -> std::io::Result<u64> {
+pub fn copy_tree(from: &Path, to: &Path, progress: &mut dyn FnMut(u64)) -> std::io::Result<u64> {
     // The running total is threaded through the recursion rather than
     // accumulated per level, so `progress` always receives the total copied so
     // far. Reporting a per-directory subtotal would make a progress bar jump
@@ -272,16 +382,6 @@ pub fn tree_size(path: &Path) -> u64 {
 mod tests {
     use super::*;
 
-    fn tmp(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "steamlib-{}-{tag}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     const SAMPLE: &str = r#"
 "libraryfolders"
 {
@@ -336,10 +436,16 @@ mod tests {
     fn recognises_an_already_registered_drive() {
         let updated = append_library_entry(SAMPLE, "/run/media/harry/CINDER");
         let existing = library_paths_in(&updated);
-        assert!(existing.iter().any(|p| paths_match(p, "/run/media/harry/CINDER")));
+        assert!(existing
+            .iter()
+            .any(|p| paths_match(p, "/run/media/harry/CINDER")));
         // Trailing slash and separator style must not fool it.
-        assert!(existing.iter().any(|p| paths_match(p, "/run/media/harry/CINDER/")));
-        assert!(!existing.iter().any(|p| paths_match(p, "/run/media/harry/OTHER")));
+        assert!(existing
+            .iter()
+            .any(|p| paths_match(p, "/run/media/harry/CINDER/")));
+        assert!(!existing
+            .iter()
+            .any(|p| paths_match(p, "/run/media/harry/OTHER")));
     }
 
     #[test]
@@ -357,14 +463,17 @@ mod tests {
 
     #[test]
     fn locates_an_installed_game_across_libraries() {
-        let root = tmp("locate");
-        let second = root.join("second");
-        std::fs::create_dir_all(root.join("steamapps/common")).unwrap();
+        let scratch = crate::testutil::Scratch::new("locate");
+        let second = scratch.join("second");
+        std::fs::create_dir_all(scratch.join("steamapps/common")).unwrap();
         std::fs::create_dir_all(second.join("steamapps/common/Hollow Knight")).unwrap();
 
         std::fs::write(
-            root.join("steamapps/libraryfolders.vdf"),
-            format!("\"libraryfolders\" {{ \"0\" {{ \"path\" \"{}\" }} }}", second.display()),
+            scratch.join("steamapps/libraryfolders.vdf"),
+            format!(
+                "\"libraryfolders\" {{ \"0\" {{ \"path\" \"{}\" }} }}",
+                second.display()
+            ),
         )
         .unwrap();
         std::fs::write(
@@ -374,34 +483,35 @@ mod tests {
         )
         .unwrap();
 
-        let game = locate(&root, "367520").expect("found in the second library");
+        let game = locate(scratch.path(), "367520").expect("found in the second library");
         assert_eq!(game.name, "Hollow Knight");
         assert_eq!(game.size_on_disk, 9_106_886_656);
-        assert_eq!(game.install_path, second.join("steamapps/common/Hollow Knight"));
+        assert_eq!(
+            game.install_path,
+            second.join("steamapps/common/Hollow Knight")
+        );
 
-        assert_eq!(locate(&root, "999999"), None);
-        std::fs::remove_dir_all(&root).ok();
+        assert_eq!(locate(scratch.path(), "999999"), None);
     }
 
     #[test]
     fn does_not_locate_a_game_whose_files_are_gone() {
-        let root = tmp("missing-files");
-        std::fs::create_dir_all(root.join("steamapps")).unwrap();
+        let scratch = crate::testutil::Scratch::new("missing-files");
+        std::fs::create_dir_all(scratch.join("steamapps")).unwrap();
         std::fs::write(
-            root.join("steamapps/appmanifest_1.acf"),
+            scratch.join("steamapps/appmanifest_1.acf"),
             r#""AppState" { "appid" "1" "name" "Ghost" "installdir" "Ghost" "StateFlags" "4" }"#,
         )
         .unwrap();
         // The manifest exists but common/Ghost does not.
-        assert_eq!(locate(&root, "1"), None);
-        std::fs::remove_dir_all(&root).ok();
+        assert_eq!(locate(scratch.path(), "1"), None);
     }
 
     #[test]
     fn copies_a_tree_and_reports_progress() {
-        let root = tmp("copy");
-        let from = root.join("from");
-        let to = root.join("to");
+        let scratch = crate::testutil::Scratch::new("copy");
+        let from = scratch.join("from");
+        let to = scratch.join("to");
         std::fs::create_dir_all(from.join("bin/data")).unwrap();
         std::fs::write(from.join("game.exe"), vec![b'x'; 100]).unwrap();
         std::fs::write(from.join("bin/lib.dll"), vec![b'y'; 250]).unwrap();
@@ -417,12 +527,100 @@ mod tests {
         assert_eq!(reports.len(), 3);
         assert!(reports.windows(2).all(|w| w[1] >= w[0]), "{reports:?}");
         assert_eq!(*reports.last().unwrap(), 1000);
-
-        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
     fn tree_size_of_a_missing_directory_is_zero() {
         assert_eq!(tree_size(Path::new("/definitely/not/here")), 0);
+    }
+}
+
+#[cfg(test)]
+mod unregister_tests {
+    use super::*;
+
+    const TWO: &str = r#"
+"libraryfolders"
+{
+	"0"
+	{
+		"path"		"/home/harry/.local/share/Steam"
+		"label"		""
+		"apps"
+		{
+			"367520"		"9106886656"
+		}
+	}
+	"1"
+	{
+		"path"		"/run/media/harry/CINDER"
+		"label"		"PC Cartridge"
+		"apps"
+		{
+		}
+	}
+	"2"
+	{
+		"path"		"/mnt/games/SteamLibrary"
+		"label"		""
+		"apps"
+		{
+			"1145360"		"15204593664"
+		}
+	}
+}
+"#;
+
+    #[test]
+    fn new_entries_carry_the_cartridge_label() {
+        let updated = append_library_entry(TWO, "/run/media/harry/HOLLOW");
+        assert!(updated.contains(CARTRIDGE_LABEL), "{updated}");
+    }
+
+    #[test]
+    fn removes_the_matching_entry_and_keeps_the_others() {
+        let out = remove_library_entry(TWO, "/run/media/harry/CINDER").expect("found");
+        let paths = library_paths_in(&out);
+        assert_eq!(
+            paths,
+            vec!["/home/harry/.local/share/Steam", "/mnt/games/SteamLibrary"]
+        );
+        // The surviving libraries keep their app bookkeeping untouched.
+        assert!(out.contains("\"367520\"\t\t\"9106886656\""));
+        assert!(out.contains("\"1145360\"\t\t\"15204593664\""));
+        // And the keys are renumbered, so no gap is left behind.
+        assert!(out.contains("\"1\"") && !out.contains("\"2\""), "{out}");
+    }
+
+    #[test]
+    fn removing_the_last_entry_works() {
+        let out = remove_library_entry(TWO, "/mnt/games/SteamLibrary").expect("found");
+        assert_eq!(
+            library_paths_in(&out),
+            vec!["/home/harry/.local/share/Steam", "/run/media/harry/CINDER"]
+        );
+    }
+
+    #[test]
+    fn a_drive_that_is_not_listed_is_left_alone() {
+        assert_eq!(remove_library_entry(TWO, "/run/media/harry/NOPE"), None);
+    }
+
+    #[test]
+    fn the_result_still_parses_as_one_block() {
+        let out = remove_library_entry(TWO, "/run/media/harry/CINDER").unwrap();
+        let parsed = steam::parse_keyvalues(&out);
+        assert_eq!(
+            parsed.get("libraryfolders").map(|f| f.entries().len()),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn round_trips_through_add_and_remove() {
+        let added = append_library_entry(TWO, "/run/media/harry/HOLLOW");
+        assert_eq!(library_paths_in(&added).len(), 4);
+        let removed = remove_library_entry(&added, "/run/media/harry/HOLLOW").unwrap();
+        assert_eq!(library_paths_in(&removed), library_paths_in(TWO));
     }
 }

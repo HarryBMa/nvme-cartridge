@@ -1,0 +1,61 @@
+/**
+ * Verify every element the frontend reaches for actually exists in its HTML.
+ *
+ * The UI ships unbundled with no framework, so `getElementById` returning null
+ * is not a build error — it is a TypeError the first time that code path runs,
+ * which may be the first time someone plugs in a cartridge. This is the cheapest
+ * possible guard against a rename in one file and not the other.
+ *
+ *   node tools/check-dom-ids.mjs
+ */
+import fs from "node:fs/promises";
+import path from "node:path";
+
+const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+
+/** Which script drives which page. */
+const PAGES = [
+  { html: "tauri-ui/index.html", scripts: ["tauri-ui/src/main.js"] },
+  { html: "tauri-ui/create.html", scripts: ["tauri-ui/src/create.js"] },
+];
+
+const idsIn = (html) =>
+  new Set([...html.matchAll(/\bid\s*=\s*["']([^"']+)["']/g)].map((m) => m[1]));
+
+const wantedBy = (js) => {
+  const wanted = new Map(); // id -> how it was referenced
+  for (const m of js.matchAll(/getElementById\(\s*["']([^"']+)["']\s*\)/g)) {
+    wanted.set(m[1], `getElementById("${m[1]}")`);
+  }
+  // Only bare "#id" selectors; anything more complex is not worth guessing at.
+  for (const m of js.matchAll(/querySelector(?:All)?\(\s*["']#([A-Za-z0-9_-]+)["']\s*\)/g)) {
+    wanted.set(m[1], `querySelector("#${m[1]}")`);
+  }
+  return wanted;
+};
+
+let failures = 0;
+
+for (const page of PAGES) {
+  const html = await fs.readFile(path.join(ROOT, page.html), "utf8");
+  const present = idsIn(html);
+
+  for (const script of page.scripts) {
+    const js = await fs.readFile(path.join(ROOT, script), "utf8");
+    const wanted = wantedBy(js);
+
+    for (const [id, how] of wanted) {
+      if (!present.has(id)) {
+        console.error(`✗ ${script}: ${how} — no #${id} in ${page.html}`);
+        failures += 1;
+      }
+    }
+    console.log(`${script} → ${page.html}: ${wanted.size} ids checked`);
+  }
+}
+
+if (failures > 0) {
+  console.error(`\n${failures} missing element${failures === 1 ? "" : "s"}.`);
+  process.exit(1);
+}
+console.log("all referenced elements exist");

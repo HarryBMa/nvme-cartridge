@@ -43,6 +43,7 @@ const el = {
   confirmLabel: document.getElementById("confirm-label"),
   create: document.getElementById("btn-create"),
   rescan: document.getElementById("btn-rescan"),
+  unregister: document.getElementById("btn-unregister"),
   close: document.getElementById("btn-close"),
   progress: document.getElementById("progress"),
   progressFill: document.getElementById("progress-fill"),
@@ -225,6 +226,14 @@ async function selectDrive(drive) {
   }
   refreshFormatFields();
   refreshCreateButton();
+
+  // Offered only for a drive Steam currently knows about, since that is the only
+  // case where there is anything to remove.
+  try {
+    el.unregister.hidden = !(await invoke("steam_registration", { drivePath: drive.path }));
+  } catch {
+    el.unregister.hidden = true;
+  }
 
   status(
     drive.hasCartridge
@@ -448,6 +457,25 @@ el.rescan.addEventListener("click", async () => {
   await Promise.all([loadGames(), loadDrives({ keepSelection: true, quiet: true })]);
   status("");
 });
+el.unregister.addEventListener("click", async () => {
+  if (!selectedDrive) return;
+  el.unregister.disabled = true;
+  try {
+    const removed = await invoke("unregister_from_steam", { drivePath: selectedDrive });
+    status(
+      removed
+        ? "Removed from Steam's library list. Its files are untouched."
+        : "That drive was not in Steam's library list.",
+      removed ? "good" : "",
+    );
+    el.unregister.hidden = removed;
+  } catch (error) {
+    status(String(error), "error");
+  } finally {
+    el.unregister.disabled = false;
+  }
+});
+
 el.close.addEventListener("click", closeWindow);
 
 document.addEventListener("keydown", (event) => {
@@ -512,6 +540,10 @@ async function demoInvoke(command, args) {
         { path: "/run/media/harry/HOLLOW", label: "HOLLOW",
           totalBytes: 128_035_676_160, freeBytes: 18_253_611_008, hasCartridge: true },
       ];
+    case "steam_registration":
+      return args.drivePath.endsWith("HOLLOW");
+    case "unregister_from_steam":
+      return true;
     case "format_plan":
       return {
         path: args.drivePath,

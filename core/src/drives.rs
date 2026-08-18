@@ -25,7 +25,7 @@ pub struct TargetDrive {
 }
 
 /// Directories a Linux desktop automounts removable media into.
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(unix)]
 const AUTOMOUNT_ROOTS: [&str; 3] = ["/media", "/run/media", "/mnt"];
 
 /// Whether a mount point may be offered as a cartridge target.
@@ -39,11 +39,7 @@ pub fn is_writable_target(mount: &Path) -> bool {
         let _ = mount;
         true
     }
-    #[cfg(target_os = "macos")]
-    {
-        mount.starts_with("/Volumes") && mount != Path::new("/Volumes")
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(unix)]
     {
         AUTOMOUNT_ROOTS.iter().any(|root| {
             let root = Path::new(root);
@@ -191,9 +187,11 @@ mod unix_impl {
     use std::process::Command;
 
     pub fn list() -> Vec<TargetDrive> {
+        // Linux only: /proc/mounts is the mount table. macOS is not a supported
+        // platform for this project (no watcher, no installer), so there is no
+        // fallback here rather than a half-working one.
         let Ok(text) = std::fs::read_to_string("/proc/mounts") else {
-            // macOS has no /proc/mounts; fall back to listing /Volumes.
-            return list_volumes_dir();
+            return Vec::new();
         };
 
         parse_proc_mounts(&text)
@@ -204,20 +202,6 @@ mod unix_impl {
                     && is_writable_target(&entry.mount)
             })
             .map(|entry| describe(&entry.mount))
-            .filter(|drive| drive.total_bytes > 0)
-            .collect()
-    }
-
-    /// macOS path: every mounted volume appears under /Volumes.
-    fn list_volumes_dir() -> Vec<TargetDrive> {
-        let Ok(entries) = std::fs::read_dir("/Volumes") else {
-            return Vec::new();
-        };
-        entries
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.is_dir() && is_writable_target(p))
-            .map(|p| describe(&p))
             .filter(|drive| drive.total_bytes > 0)
             .collect()
     }
@@ -237,7 +221,12 @@ mod unix_impl {
     }
 
     fn df(mount: &Path) -> Option<(u64, u64)> {
-        let out = Command::new("df").arg("-P").arg("-k").arg(mount).output().ok()?;
+        let out = Command::new("df")
+            .arg("-P")
+            .arg("-k")
+            .arg(mount)
+            .output()
+            .ok()?;
         if !out.status.success() {
             return None;
         }
@@ -390,7 +379,7 @@ proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0
     }
 
     #[test]
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(unix)]
     fn only_automounted_media_is_a_writable_target() {
         // The whole safety property of the wizard.
         for good in [
@@ -398,7 +387,10 @@ proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0
             "/run/media/harry/CART",
             "/mnt/cartridge",
         ] {
-            assert!(is_writable_target(Path::new(good)), "{good} should be allowed");
+            assert!(
+                is_writable_target(Path::new(good)),
+                "{good} should be allowed"
+            );
         }
         for bad in [
             "/",
@@ -422,10 +414,14 @@ proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0
 
     #[test]
     fn rejects_pseudo_and_readonly_filesystems() {
-        for fs in ["tmpfs", "proc", "sysfs", "overlay", "iso9660", "nfs4", "cifs"] {
+        for fs in [
+            "tmpfs", "proc", "sysfs", "overlay", "iso9660", "nfs4", "cifs",
+        ] {
             assert!(is_pseudo_filesystem(fs), "{fs}");
         }
-        for fs in ["ext4", "exfat", "vfat", "ntfs", "ntfs3", "btrfs", "xfs", "f2fs"] {
+        for fs in [
+            "ext4", "exfat", "vfat", "ntfs", "ntfs3", "btrfs", "xfs", "f2fs",
+        ] {
             assert!(!is_pseudo_filesystem(fs), "{fs} should be usable");
         }
         // Case from /proc/mounts is not guaranteed.

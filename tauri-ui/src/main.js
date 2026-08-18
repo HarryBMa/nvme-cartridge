@@ -328,8 +328,21 @@ el.play.addEventListener("click", async () => {
   }
 });
 
+/** Set once the user has been warned that a game lives on this cartridge. */
+let ejectConfirmed = false;
+
 el.eject.addEventListener("click", async () => {
   if (!cartridge || el.eject.disabled) return;
+
+  // A cartridge that only holds a conf file can go at any time. One carrying the
+  // game itself may be feeding a running process, so it asks once.
+  if (cartridge.holds_game && !ejectConfirmed) {
+    ejectConfirmed = true;
+    el.eject.querySelector(".btn__label").textContent = "Eject anyway";
+    toast("The game is installed on this cartridge. Quit it first, then press Eject again.", true);
+    return;
+  }
+
   setBusy(true);
   toast("Ejecting…");
   try {

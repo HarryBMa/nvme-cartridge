@@ -58,6 +58,10 @@ form factor being pleasant to handle.
 **Filesystem:** exFAT if you want the cartridge to work on both Windows and
 Linux. NTFS or ext4 are fine for one OS.
 
+**Platforms:** Windows and Linux. macOS is not supported — there is no watcher,
+no installer and no icon set for it, so rather than ship something half-working
+the macOS branches were removed.
+
 ## Setup
 
 ### Prerequisites
@@ -194,6 +198,18 @@ What that leaves:
 - **A plugged-in cartridge shows a window.** Detection reads
   `cartridge.conf` — a text file — and draws the title. Titles are inserted as
   text, never as markup.
+- **Eject asks twice when the game lives on the cartridge.** Pulling a drive a
+  running game is reading from is a different mistake to pulling one that holds
+  only a text file, so the launcher says so before doing it.
+
+### Cartridges in Steam's library list
+
+A cartridge you copied a game onto is registered in Steam's
+`libraryfolders.vdf`, labelled `PC Cartridge`. Those entries are never removed
+automatically: a cartridge is *meant* to spend most of its life unplugged, so a
+missing folder is the normal state rather than stale cruft. When you reformat or
+repurpose one, the wizard offers **Remove this drive from Steam's library list**
+for the selected drive. Steam must be closed — it rewrites that file on exit.
 
 ## Layout
 
@@ -203,18 +219,33 @@ cartridge-windows.ps1       installer menu (Windows)
 cartridge.conf.example      the one file a cartridge needs
 linux/                      udev rule, systemd units, mount + eject helpers
 windows/                    install / uninstall / eject scripts
+core/                       cartridge logic, no UI — this is where the tests are
 watcher/                    resident volume watcher (Windows only, Rust)
 tauri-ui/                   one binary, two windows (Tauri 2 + Rust, no framework)
   index.html                the launcher popup
   create.html               the create-cartridge wizard
   src/tokens.css            palette and type shared by both
-  src-tauri/src/playnite.rs  Playnite library import
-  src-tauri/src/steam.rs     Steam manifest / library reader
-  src-tauri/src/steamlib.rs  copy a game, register the cartridge with Steam
-  src-tauri/src/format.rs    exFAT formatting, behind confirmation
-  src-tauri/src/autorun.rs   autorun.inf for the drive's name and icon
+tools/                      icon generation, DOM-id check
 docs/                       screenshots
 ```
+
+## Working on it
+
+The logic lives in `core/` (crate `cartridge-core`), deliberately free of any UI
+dependency, so the tests run anywhere:
+
+```bash
+cargo test --manifest-path core/Cargo.toml     # 81 tests, no webkit needed
+```
+
+That split is the point: the Tauri binary cannot be compiled without webkit2gtk
+and a display, so tests living inside it could not run in CI or on a
+contributor's machine.
+
+CI runs that suite plus clippy and rustfmt, compiles the watcher on Linux and
+Windows, `cargo check`s the launcher on both, parses the frontend JavaScript, and
+verifies every element the scripts reach for exists in the HTML — the UI ships
+unbundled, so a missing id is a runtime crash rather than a build error.
 
 ## Uninstall
 

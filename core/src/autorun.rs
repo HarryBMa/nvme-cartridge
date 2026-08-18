@@ -77,8 +77,16 @@ pub fn ico_from_png(png: &[u8]) -> Option<Vec<u8>> {
     out.extend_from_slice(&1u16.to_le_bytes());
 
     // ICONDIRENTRY. 256 is encoded as 0.
-    out.push(if width == MAX_ICON_EDGE { 0 } else { width as u8 });
-    out.push(if height == MAX_ICON_EDGE { 0 } else { height as u8 });
+    out.push(if width == MAX_ICON_EDGE {
+        0
+    } else {
+        width as u8
+    });
+    out.push(if height == MAX_ICON_EDGE {
+        0
+    } else {
+        height as u8
+    });
     out.push(0); // palette count: 0 for non-palettised
     out.push(0); // reserved
     out.extend_from_slice(&1u16.to_le_bytes()); // colour planes
@@ -108,7 +116,11 @@ pub fn write_autorun(
 /// Produce `cover.ico` on the cartridge if we can, and return its name.
 fn make_icon(root: &Path, cover: &Path) -> Option<String> {
     // An .ico supplied by the user is used as-is.
-    if cover.extension().and_then(|e| e.to_str())?.eq_ignore_ascii_case("ico") {
+    if cover
+        .extension()
+        .and_then(|e| e.to_str())?
+        .eq_ignore_ascii_case("ico")
+    {
         let destination = root.join("cover.ico");
         if cover != destination {
             std::fs::copy(cover, &destination).ok()?;
@@ -177,7 +189,10 @@ mod tests {
         assert_eq!(png_dimensions(b"not a png at all"), None);
         assert_eq!(png_dimensions(&[]), None);
         // A JPEG must not be mistaken for one.
-        assert_eq!(png_dimensions(&[0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0]), None);
+        assert_eq!(
+            png_dimensions(&[0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0]),
+            None
+        );
     }
 
     #[test]
@@ -219,32 +234,32 @@ mod tests {
 
     #[test]
     fn writes_autorun_and_uses_a_supplied_ico() {
-        let dir = std::env::temp_dir().join(format!("autorun-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let scratch = crate::testutil::Scratch::new("autorun");
 
         // No cover: label only.
-        assert_eq!(write_autorun(&dir, "PLAIN", None).unwrap(), None);
-        let text = std::fs::read_to_string(dir.join("autorun.inf")).unwrap();
+        assert_eq!(write_autorun(scratch.path(), "PLAIN", None).unwrap(), None);
+        let text = std::fs::read_to_string(scratch.join("autorun.inf")).unwrap();
         assert!(text.contains("label=PLAIN"));
         assert!(!text.contains("icon="));
 
         // A PNG small enough to wrap.
-        let png_path = dir.join("art.png");
+        let png_path = scratch.join("art.png");
         std::fs::write(&png_path, fake_png(64, 64)).unwrap();
         assert_eq!(
-            write_autorun(&dir, "WRAPPED", Some(&png_path)).unwrap(),
+            write_autorun(scratch.path(), "WRAPPED", Some(&png_path)).unwrap(),
             Some("cover.ico".to_string())
         );
-        assert!(dir.join("cover.ico").is_file());
+        assert!(scratch.join("cover.ico").is_file());
 
         // A JPEG cover: autorun still written, no icon key.
-        let jpg_path = dir.join("art.jpg");
+        let jpg_path = scratch.join("art.jpg");
         std::fs::write(&jpg_path, b"\xff\xd8\xff\xe0 not really a jpeg").unwrap();
-        assert_eq!(write_autorun(&dir, "JPEG", Some(&jpg_path)).unwrap(), None);
-        let text = std::fs::read_to_string(dir.join("autorun.inf")).unwrap();
+        assert_eq!(
+            write_autorun(scratch.path(), "JPEG", Some(&jpg_path)).unwrap(),
+            None
+        );
+        let text = std::fs::read_to_string(scratch.join("autorun.inf")).unwrap();
         assert!(text.contains("label=JPEG"));
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// A PNG header with real dimensions; the pixel data is irrelevant here.
