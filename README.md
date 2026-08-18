@@ -3,7 +3,7 @@
 <img src="docs/icon.png" width="96" alt="" />
 
 
-<text="support me!" href="https://ko-fi.com/harrybma"/>
+<a href="https://ko-fi.com/harrybma">Support my work!</a>
 
 
 # NVMe Game Cartridges
