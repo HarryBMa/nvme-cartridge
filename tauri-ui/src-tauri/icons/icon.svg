@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>PC Cartridge System</title>
+  <!--
+    App icon: a cartridge, drawn as flat vector so it stays crisp from 16px to
+    512px. Rasterised into the PNG/ICO set by tools/make-icons.mjs; edit this
+    file rather than the bitmaps.
+
+    The label is a 244x212 well at (134,130). Everything inside it is laid out
+    against three bands: an accent flash along the top, the wordmark, then the
+    main diagonals running to the bottom edge.
+
+    The wordmark uses Archivo, the same family as the launcher UI. It is
+    supplied by the rasteriser, which inlines this markup into a page that
+    declares the @font-face - an SVG loaded as an <img> cannot fetch fonts.
+  -->
+  <defs>
+    <clipPath id="label-clip">
+      <rect x="134" y="130" width="244" height="212" rx="11" />
+    </clipPath>
+  </defs>
+
+  <!-- Shoulder behind the shell, for a little depth at the edges -->
+  <rect x="96" y="94" width="320" height="288" rx="20" fill="#0d0d10" />
+
+  <!-- Connector tab -->
+  <rect x="148" y="358" width="216" height="58" rx="12" fill="#17171b" />
+
+  <!-- Shell -->
+  <rect x="106" y="100" width="300" height="276" rx="17" fill="#1b1b1f" />
+
+  <!-- Recessed label -->
+  <rect x="134" y="130" width="244" height="212" rx="11" fill="#08080a" />
+
+  <g clip-path="url(#label-clip)">
+    <!-- Accent flash, sitting above the wordmark -->
+    <path d="M250 162 L272 162 L292 130 L270 130 Z" fill="#E8252B" />
+    <path d="M276 162 L306 162 L326 130 L296 130 Z" fill="#F5811F" />
+    <path d="M310 162 L358 162 L378 130 L330 130 Z" fill="#FBD407" />
+
+    <!-- Main diagonals, running out through the bottom edge -->
+    <path d="M150 342 L194 342 L270 220 L226 220 Z" fill="#E8252B" />
+    <path d="M198 342 L242 342 L318 220 L274 220 Z" fill="#F5811F" />
+    <path d="M246 342 L290 342 L366 220 L322 220 Z" fill="#FBD407" />
+  </g>
+
+  <text x="256" y="206" text-anchor="middle"
+        font-family="Archivo, sans-serif"
+        font-size="35" font-weight="800" font-stretch="102%"
+        letter-spacing="0.4" fill="#F7F7F5">CARTRIDGE</text>
+</svg>
