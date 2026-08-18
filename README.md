@@ -94,6 +94,10 @@ The launcher is a webview, so it is not small *while it is on screen* — expect
 around 100 MB for the few seconds it is up, then it exits and gives all of it
 back. There is no tray icon and no background service for the UI.
 
+The watcher ignores a second arrival on the same drive letter within 4 seconds,
+so a cartridge that is ejected and immediately re-inserted may require a brief
+pause before the launcher reopens.
+
 ## The launcher
 
 The window is 420 × 560 — the 3:4 of a cover — and the artwork fills it. Only
@@ -128,6 +132,17 @@ one list covering Steam, GOG, Epic, Xbox, Ubisoft, itch and emulators — and
 Steam's own manifests are read too, which is the only source on Linux. Cover art
 comes from whichever cache the game came from, so **nothing is fetched**; the
 wizard works with no network at all.
+
+Playnite is detected automatically on Windows (the standard `%APPDATA%\Playnite`
+location and portable installs in `Program Files`) and on Linux through every
+Proton `compatdata` prefix that contains a Playnite install. If detection fails,
+a **Playnite data folder** field appears at the bottom of the game list so you
+can point the wizard at the right directory.
+
+> **Note:** Playnite stores its library in a binary database. The wizard reads a
+> JSON export instead — install a library-exporter extension in Playnite and run
+> it once before using the wizard. Any extension that writes a `library.json` or
+> `games.json` file will work.
 
 Pick a game, pick the drive, choose what goes on it, press Write.
 
@@ -301,7 +316,6 @@ cartridge-windows.ps1       installer menu (Windows)
 cartridge.conf.example      the one file a cartridge needs
 core/                       cartridge logic, no UI — this is where the tests are
 linux/                      udev rule, systemd units, mount + eject helpers
-windows/                    install / uninstall / eject scripts
 watcher/                    resident volume watcher (Windows only, Rust)
 tauri-ui/                   one binary, two windows (Tauri 2 + Rust, no framework)
 tools/                      icon generation, DOM-id check

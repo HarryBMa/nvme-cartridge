@@ -304,7 +304,7 @@ pub fn parse_export(json: &str) -> Result<Vec<PlayniteGame>, ImportError> {
         return Err(ImportError::Empty);
     }
 
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|a| a.name.to_lowercase());
     out.dedup_by(|a, b| a.id == b.id);
     Ok(out)
 }
@@ -344,10 +344,26 @@ pub fn playnite_root() -> Option<PathBuf> {
         // Playnite is a Windows application, but it is commonly run under Proton,
         // so look inside the usual prefixes before giving up.
         if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+            // Wine default prefix.
             candidates.push(home.join(".wine/drive_c/users/steamuser/AppData/Roaming/Playnite"));
-            candidates.push(
-                home.join(".steam/steam/steamapps/compatdata/975330/pfx/drive_c/users/steamuser/AppData/Roaming/Playnite"),
-            );
+
+            // Scan every Proton compatdata prefix rather than hard-coding one
+            // app ID. The Playnite Steam app (975330) is the common case, but
+            // users may have it in a custom non-Steam game entry or a different
+            // Proton prefix, and scanning is cheap because only the directories
+            // that exist under compatdata are checked.
+            let compatdata = home.join(".steam/steam/steamapps/compatdata");
+            if let Ok(entries) = std::fs::read_dir(&compatdata) {
+                for entry in entries.flatten() {
+                    if !entry.path().is_dir() {
+                        continue;
+                    }
+                    let candidate = entry
+                        .path()
+                        .join("pfx/drive_c/users/steamuser/AppData/Roaming/Playnite");
+                    candidates.push(candidate);
+                }
+            }
         }
     }
 

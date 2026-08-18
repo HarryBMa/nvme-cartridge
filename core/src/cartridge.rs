@@ -136,11 +136,11 @@ pub fn read_cartridge_info(drive_path: &str) -> Result<CartridgeInfo, String> {
 
         let ini = parse_ini(&content);
 
-        let executable = ini_get(&ini, "autorun", "open")
-            .or_else(|| ini_get(&ini, "autorun", "shellexecute"))
-            .cloned()
-            .unwrap_or_default();
-
+        // `open=` and `shellexecute=` are deliberately not used as the Play
+        // target. Windows has ignored them on non-optical media since Windows 7
+        // — they are the original autorun malware vector. A drive that has only
+        // an autorun.inf can still be shown in the launcher (label + cover art),
+        // but Play will be disabled because there is no executable to run.
         let title = ini_get(&ini, "autorun", "label")
             .cloned()
             .unwrap_or_else(|| "Unknown Game".to_string());
@@ -154,7 +154,9 @@ pub fn read_cartridge_info(drive_path: &str) -> Result<CartridgeInfo, String> {
             title,
             cover: cover_as_data_uri(&cover_path),
             cover_path,
-            executable,
+            // Empty: autorun.inf's open= and shellexecute= are not used as the
+            // play target; Play is intentionally disabled for autorun-only drives.
+            executable: String::new(),
             drive_path: drive_path.to_string(),
             holds_game: holds_game(root),
         });
@@ -359,11 +361,17 @@ mod tests {
         let scratch = crate::testutil::Scratch::new("autorun");
         std::fs::write(
             scratch.join("autorun.inf"),
-            "[autorun]\r\nlabel=Legacy Disc\r\nicon=cover.ico\r\n",
+            "[autorun]\r\nlabel=Legacy Disc\r\nicon=cover.ico\r\nopen=evil.exe\r\n",
         )
         .unwrap();
         let info = read_cartridge_info(scratch.path().to_str().unwrap()).unwrap();
         assert_eq!(info.title, "Legacy Disc");
+        // open= and shellexecute= must never reach the launcher as a play target.
+        assert!(
+            info.executable.is_empty(),
+            "executable should be empty, got {:?}",
+            info.executable
+        );
     }
 
     #[test]

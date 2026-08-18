@@ -296,9 +296,12 @@ fn get_parent_device(partition: &str) -> String {
 // --------------------------------------------------------------------------
 
 /// Everything installed, from Playnite where available and Steam otherwise.
+///
+/// `playnite_root` lets the wizard pass a user-supplied Playnite data directory
+/// when auto-discovery failed. If absent, the usual lookup is used.
 #[tauri::command]
-fn list_games() -> Result<Vec<create::GameInfo>, String> {
-    create::list_games()
+fn list_games(playnite_root: Option<String>) -> Result<Vec<create::GameInfo>, String> {
+    create::list_games(playnite_root.as_deref())
 }
 
 #[tauri::command]
