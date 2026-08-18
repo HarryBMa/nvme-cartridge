@@ -46,10 +46,35 @@ size of a USB stick, so a shelf of ten cartridges takes almost no room. 128 GB
 holds most single games, and the whole point of a cartridge is that it carries
 one thing.
 
-10 Gbps over USB 3.2 Gen 2 is around 1 GB/s in practice — fast enough to play
-directly off the cartridge rather than treating it as cold storage. The aluminium
+The enclosure is doing two jobs. It makes the cartridge pocketable, and it keeps
+the wear away from the NVMe stick itself. A bare M.2 NVMe edge connector is
+typically only rated for roughly **50–100 insertion cycles**; used as a raw
+plug-in cartridge, the drive would become the sacrificial part. In a USB
+enclosure, the NVMe drive is installed once and left alone, while the repeated
+insertions happen on the cheaper, easier-to-replace USB side instead.
+
+That trade-off does **not** mean giving up useful speed. 10 Gbps over USB 3.2
+Gen 2 is around 1 GB/s in practice — already ahead of what a 2.5" SATA SSD can
+deliver, and far beyond Switch-cartridge or SD-card territory. The aluminium
 body doubles as the heatsink, which matters when a game is streaming assets off
 it for hours.
+
+| Medium | Practical read speed | What runs comfortably | Notes |
+|---|---:|---|---|
+| **USB 3.2 Gen 2 enclosure + 2230 NVMe** | **~800–1000 MB/s** | Indies, emulators, AA games, older AAA games, and many modern installs | The USB link is not the bottleneck here; drive quality and thermals usually matter more |
+| **2.5" SATA SSD** | ~500–550 MB/s | Most PC games, including many large installs | Still slower than a 10 Gbps USB NVMe enclosure |
+| **Nintendo Switch game card** | ~50–100 MB/s | Games built and optimised around console-style asset budgets | Much slower, but the software is designed for it |
+| **UHS-I SD / microSD** | ~30–90 MB/s | Retro libraries, indies, lightweight PC games, emulators | Fine for small assets; weak for large modern PC installs |
+
+So the practical answer is: the **adapter is the durability win**, and USB 3.2
+is still fast enough that the cartridge remains a real play-from-media device
+rather than just cold storage.
+
+For this build, cheap refurbished bulk 2230 drives are a value play, not a
+promise of flagship performance. They should be perfectly usable for indies,
+retro, emulation, smaller AA releases and plenty of older AAA games, but the
+newest asset-streaming-heavy PC blockbusters may still be happier on a strong
+internal NVMe if a bargain cartridge drive cannot keep up.
 
 Nothing here is specific to NVMe or to 2230. Any removable storage your OS will
 automount works: 2.5" SATA SSDs in a dock, SD cards, USB sticks, external HDDs.
