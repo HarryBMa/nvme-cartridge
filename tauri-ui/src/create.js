@@ -5,6 +5,10 @@
  *   list_games()                     -> [{ id, name, library, source, sizeOnDisk,
  *                                          hasCover, executable, canCopy }]
  *   game_cover({ library, id })      -> "data:image/…" | ""
+ *   sgdb_search_games({ query })      -> [{ id, name }]
+ *   sgdb_get_artwork({ gameId, artType }) -> [{ id, url, thumb, width, height }]
+ *   sgdb_download_artwork({ url, cacheKey, gameKey? }) -> "/abs/path/image.jpg"
+ *   sgdb_last_used_artwork({ gameKey }) -> { path, dataUri } | null
  *   list_target_drives()             -> [{ path, label, totalBytes, freeBytes, hasCartridge }]
  *   format_plan({ drivePath })       -> { path, currentLabel, device, totalBytes, warning }
  *   executable_choices({ playniteId }) -> [{ relative, name, score }]  best first
@@ -35,6 +39,8 @@ const el = {
   previewImg: document.getElementById("preview-img"),
   previewTitle: document.getElementById("preview-title"),
   previewSub: document.getElementById("preview-sub"),
+  previewSource: document.getElementById("preview-source"),
+  btnSgdb: document.getElementById("btn-sgdb"),
   drives: document.getElementById("drives"),
   drivesEmpty: document.getElementById("drives-empty"),
   optCopy: document.getElementById("opt-copy"),
@@ -56,6 +62,13 @@ const el = {
   progressFill: document.getElementById("progress-fill"),
   progressText: document.getElementById("progress-text"),
   status: document.getElementById("status"),
+  sgdbDialog: document.getElementById("sgdb-dialog"),
+  sgdbSearch: document.getElementById("sgdb-search"),
+  sgdbType: document.getElementById("sgdb-type"),
+  sgdbStatus: document.getElementById("sgdb-status"),
+  sgdbResults: document.getElementById("sgdb-results"),
+  sgdbManualUrl: document.getElementById("sgdb-manual-url"),
+  sgdbUseManual: document.getElementById("sgdb-use-manual"),
 };
 
 let games = [];
@@ -68,6 +81,10 @@ let formatPlan = null;
 let building = false;
 /** Candidates for what Play should start, when copying a non-Steam game. */
 let exeCandidates = [];
+let selectedCoverSource = null;
+let sgdbSearchTimer = null;
+let sgdbResultsFor = [];
+let sgdbSelectedGameId = null;
 
 /* ========================================================================== */
 
@@ -140,25 +157,38 @@ async function selectGame(game) {
   manualMode = false;
   el.custom.hidden = true;
   selectedGame = game;
+  selectedCoverSource = null;
 
   el.previewTitle.textContent = game.name;
   el.previewSub.textContent = game.executable;
-  setPreviewArt("");
+  setPreviewArt("", "");
   renderGames();
   refreshOptions();
   refreshCreateButton();
 
+  const gameKey = `${game.library}:${game.id}`;
+  try {
+    const cached = await invoke("sgdb_last_used_artwork", { gameKey });
+    if (cached?.dataUri && selectedGame?.id === game.id) {
+      selectedCoverSource = cached.path;
+      setPreviewArt(cached.dataUri, "From SteamGridDB");
+      return;
+    }
+  } catch {
+    // Cache miss or unavailable cache index.
+  }
+
   if (game.hasCover) {
     try {
       const uri = await invoke("game_cover", { library: game.library, id: game.id });
-      if (uri && selectedGame?.id === game.id) setPreviewArt(uri);
+      if (uri && selectedGame?.id === game.id) setPreviewArt(uri, "");
     } catch {
       // No art is not an error.
     }
   }
 }
 
-function setPreviewArt(src) {
+function setPreviewArt(src, source = "") {
   if (src) {
     el.previewImg.src = src;
     el.previewArt.classList.add("has-art");
@@ -166,13 +196,16 @@ function setPreviewArt(src) {
     el.previewImg.removeAttribute("src");
     el.previewArt.classList.remove("has-art");
   }
+  el.previewSource.hidden = !source;
+  el.previewSource.textContent = source || "";
 }
 
 function enterManualMode() {
   manualMode = true;
   selectedGame = null;
+  selectedCoverSource = null;
   el.custom.hidden = false;
-  setPreviewArt("");
+  setPreviewArt("", "");
   el.previewTitle.textContent = "By hand";
   el.previewSub.textContent = "No cover art will be copied.";
   renderGames();
@@ -234,6 +267,7 @@ async function selectDrive(drive) {
     // Not formattable: the option stays available but will refuse on Write.
   }
   refreshFormatFields();
+  refreshOptions();
   refreshCreateButton();
 
   // Offered only for a drive Steam currently knows about, since that is the only
@@ -257,16 +291,27 @@ function refreshOptions() {
   const copyable = !manualMode && Boolean(selectedGame?.canCopy);
   el.optCopy.disabled = !copyable;
   if (!copyable) el.optCopy.checked = false;
+  el.btnSgdb.disabled = !Boolean((selectedGame && !manualMode) || el.customTitle.value.trim());
 
   // The two routes differ enough to be worth saying which one applies.
   const isSteam = selectedGame?.library === "steam";
-  el.optCopyHint.textContent = copyable
+  let hint = copyable
     ? isSteam
       ? "Also registers the drive as a Steam library, so Steam plays from the cartridge instead of your internal copy."
       : "Copies the game's folder onto the cartridge and points Play at a file inside it. No launcher needed."
     : manualMode
       ? "Only available for a game picked from the list."
       : "Playnite does not record where this one is installed, so there is nothing to copy.";
+  if (el.optCopy.checked && selectedGame && selectedDrive) {
+    const drive = drives.find((d) => d.path === selectedDrive);
+    if (drive) {
+      const capacity = el.optFormat.checked ? drive.totalBytes : drive.freeBytes;
+      if (selectedGame.sizeOnDisk > 0 && selectedGame.sizeOnDisk > capacity) {
+        hint = `Not enough space: needs ${formatBytes(selectedGame.sizeOnDisk)}, has ${formatBytes(capacity)}.`;
+      }
+    }
+  }
+  el.optCopyHint.textContent = hint;
 
   refreshExePicker();
 }
@@ -354,6 +399,136 @@ function defaultLabel(title) {
   return cleaned || "CARTRIDGE";
 }
 
+/* -------------------------------------------------------------- SteamGridDB */
+
+function sgdbGameKey() {
+  if (selectedGame && !manualMode) return `${selectedGame.library}:${selectedGame.id}`;
+  const title = el.customTitle.value.trim();
+  return title ? `manual:${title}` : "";
+}
+
+function openSgdbDialog() {
+  const seed = selectedGame?.name || el.customTitle.value.trim();
+  if (!seed) {
+    status("Pick a game or type a title first.", "error");
+    return;
+  }
+  el.sgdbSearch.value = seed;
+  el.sgdbStatus.textContent = "Searching…";
+  el.sgdbResults.replaceChildren();
+  sgdbSelectedGameId = null;
+  if (typeof el.sgdbDialog.showModal === "function") {
+    el.sgdbDialog.showModal();
+  }
+  queueSgdbSearch();
+}
+
+function queueSgdbSearch() {
+  clearTimeout(sgdbSearchTimer);
+  sgdbSearchTimer = setTimeout(loadSgdbGamesAndArtwork, 220);
+}
+
+async function loadSgdbGamesAndArtwork() {
+  const query = el.sgdbSearch.value.trim();
+  if (!query) {
+    el.sgdbStatus.textContent = "Type a game title.";
+    el.sgdbResults.replaceChildren();
+    return;
+  }
+  el.sgdbStatus.textContent = "Searching…";
+  try {
+    const gamesFound = await invoke("sgdb_search_games", { query });
+    if (!Array.isArray(gamesFound) || gamesFound.length === 0) {
+      sgdbResultsFor = [];
+      el.sgdbResults.replaceChildren();
+      el.sgdbStatus.textContent = "No SteamGridDB matches yet.";
+      return;
+    }
+    sgdbSelectedGameId =
+      gamesFound.find((g) => g.name?.toLowerCase() === query.toLowerCase())?.id || gamesFound[0].id;
+    await loadSgdbArtwork(gamesFound[0].name || query);
+  } catch (error) {
+    el.sgdbStatus.textContent = `SteamGridDB unavailable. You can still paste a URL. (${String(error)})`;
+  }
+}
+
+async function loadSgdbArtwork(matchName) {
+  if (!sgdbSelectedGameId) return;
+  el.sgdbStatus.textContent = "Loading artwork…";
+  try {
+    const artType = el.sgdbType.value;
+    const list = await invoke("sgdb_get_artwork", { gameId: sgdbSelectedGameId, artType });
+    sgdbResultsFor = Array.isArray(list) ? list : [];
+    renderSgdbResults(matchName);
+    el.sgdbStatus.textContent = sgdbResultsFor.length
+      ? `Showing ${sgdbResultsFor.length} ${artType} image${sgdbResultsFor.length === 1 ? "" : "s"} for ${matchName}.`
+      : "No artwork found for that type.";
+  } catch (error) {
+    el.sgdbStatus.textContent = `Artwork lookup failed: ${String(error)}`;
+    sgdbResultsFor = [];
+    renderSgdbResults(matchName);
+  }
+}
+
+function renderSgdbResults(matchName) {
+  el.sgdbResults.replaceChildren();
+  for (const art of sgdbResultsFor) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "sgdb-card";
+
+    const img = document.createElement("img");
+    img.src = art.thumb || art.url;
+    img.alt = `${matchName} artwork`;
+
+    const meta = document.createElement("span");
+    meta.textContent = art.width && art.height ? `${art.width}×${art.height}` : "SteamGridDB";
+
+    card.append(img, meta);
+    card.addEventListener("click", () => chooseSgdbArtwork(art));
+    el.sgdbResults.append(card);
+  }
+}
+
+async function chooseSgdbArtwork(art) {
+  const keyBase = (selectedGame?.name || el.customTitle.value.trim() || "manual").toLowerCase();
+  const cacheKey = `${keyBase}-${el.sgdbType.value}-${art.id}`;
+  const gameKey = sgdbGameKey();
+  try {
+    const cachedPath = await invoke("sgdb_download_artwork", {
+      url: art.url,
+      cacheKey,
+      gameKey: gameKey || null,
+    });
+    selectedCoverSource = cachedPath;
+    setPreviewArt(art.url, "From SteamGridDB");
+    status("Selected artwork from SteamGridDB.", "good");
+    if (el.sgdbDialog.open) el.sgdbDialog.close("selected");
+  } catch (error) {
+    status(`Could not download artwork: ${String(error)}`, "error");
+  }
+}
+
+async function useManualSgdbUrl() {
+  const url = el.sgdbManualUrl.value.trim();
+  if (!url) return;
+  const keyBase = (selectedGame?.name || el.customTitle.value.trim() || "manual").toLowerCase();
+  const gameKey = sgdbGameKey();
+  try {
+    const cachedPath = await invoke("sgdb_download_artwork", {
+      url,
+      cacheKey: `${keyBase}-manual-url`,
+      gameKey: gameKey || null,
+    });
+    selectedCoverSource = cachedPath;
+    setPreviewArt(url, "From SteamGridDB");
+    status("Selected artwork URL.", "good");
+    if (el.sgdbDialog.open) el.sgdbDialog.close("selected");
+  } catch (error) {
+    status(`Could not fetch that URL: ${String(error)}`, "error");
+  }
+}
+
 /* ----------------------------------------------------------------- create */
 
 function intent() {
@@ -387,6 +562,16 @@ function refreshCreateButton() {
   // A non-Steam copy has nothing to point Play at until a program is chosen.
   if (ok && !el.exePick.hidden && exeCandidates.length === 0) {
     ok = false;
+  }
+
+  if (ok && el.optCopy.checked && selectedGame && selectedDrive) {
+    const drive = drives.find((d) => d.path === selectedDrive);
+    if (drive) {
+      const capacity = el.optFormat.checked ? drive.totalBytes : drive.freeBytes;
+      if (selectedGame.sizeOnDisk > 0 && selectedGame.sizeOnDisk > capacity) {
+        ok = false;
+      }
+    }
   }
 
   // Formatting must be confirmed before Write is even offered.
@@ -441,7 +626,7 @@ async function writeCartridge() {
         executable: want.executable,
         appId: want.appId,
         playniteId: want.playniteId,
-        coverSource: null,
+        coverSource: selectedCoverSource,
         formatDrive: el.optFormat.checked,
         formatLabel: el.formatLabel.value.trim() || null,
         formatConfirmation: el.formatConfirm.value.trim() || null,
@@ -525,6 +710,12 @@ async function loadDrives({ keepSelection = false, quiet = false } = {}) {
 
 el.search.addEventListener("input", renderGames);
 el.btnCustom.addEventListener("click", enterManualMode);
+el.btnSgdb.addEventListener("click", openSgdbDialog);
+el.sgdbSearch.addEventListener("input", queueSgdbSearch);
+el.sgdbType.addEventListener("change", () => {
+  if (sgdbSelectedGameId) loadSgdbArtwork(el.sgdbSearch.value.trim());
+});
+el.sgdbUseManual.addEventListener("click", useManualSgdbUrl);
 el.btnPlayniteLocate.addEventListener("click", async () => {
   const path = el.playniteRoot.value.trim();
   if (!path) return;
@@ -536,6 +727,7 @@ el.btnPlayniteLocate.addEventListener("click", async () => {
 });
 el.customTitle.addEventListener("input", () => {
   refreshCreateButton();
+  refreshOptions();
   if (el.optFormat.checked && !el.formatLabel.value) refreshFormatFields();
 });
 el.customExec.addEventListener("input", refreshCreateButton);
@@ -546,6 +738,7 @@ el.optCopy.addEventListener("change", () => {
 el.exeChoices.addEventListener("change", refreshCreateButton);
 el.optFormat.addEventListener("change", () => {
   refreshFormatFields();
+  refreshOptions();
   refreshCreateButton();
 });
 el.formatConfirm.addEventListener("input", refreshCreateButton);
@@ -632,6 +825,32 @@ async function demoInvoke(command, args) {
       ];
     case "game_cover":
       return args.id === "367520" ? "src/demo/cover.jpg" : "";
+    case "sgdb_last_used_artwork":
+      return null;
+    case "sgdb_search_games":
+      return [
+        { id: 1, name: args.query || "Hollow Knight" },
+        { id: 2, name: "God of War" },
+      ];
+    case "sgdb_get_artwork":
+      return [
+        {
+          id: 7001,
+          url: "https://cdn.steamgriddb.com/grid/demo-7001.jpg",
+          thumb: "src/demo/cover.jpg",
+          width: 600,
+          height: 900,
+        },
+        {
+          id: 7002,
+          url: "https://cdn.steamgriddb.com/grid/demo-7002.jpg",
+          thumb: "src/demo/cover.jpg",
+          width: 460,
+          height: 215,
+        },
+      ];
+    case "sgdb_download_artwork":
+      return "/tmp/sgdb-cache/demo-cover.jpg";
     case "list_target_drives":
       return [
         { path: "/run/media/harry/CINDER", label: "CINDER",

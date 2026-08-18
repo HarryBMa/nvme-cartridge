@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::drives::{self, TargetDrive};
-use crate::{autorun, format, playnite, portable, steam, steamlib};
+use crate::{autorun, format, playnite, portable, sgdb, steam, steamlib};
 
 /// Largest cover we will copy onto a cartridge.
 const MAX_COVER_BYTES: u64 = 8 * 1024 * 1024;
@@ -261,18 +261,22 @@ pub fn game_cover(library: Library, id: &str) -> String {
             if !is_numeric(id) {
                 return String::new();
             }
-            steam::steam_root().and_then(|root| steam::find_cover(&root, id))
+            steam::steam_root()
+                .and_then(|root| steam::find_cover(&root, id))
+                .or_else(|| sgdb::last_used_artwork(&format!("steam:{id}")))
         }
-        Library::Playnite => playnite::playnite_root().and_then(|root| {
-            let exports = playnite::find_exports(&root);
-            exports
-                .iter()
-                .filter_map(|p| playnite::import_from(p).ok())
-                .flatten()
-                .find(|g| g.id == id)
-                .and_then(|g| g.cover)
-                .and_then(|c| playnite::resolve_cover(&root, &c))
-        }),
+        Library::Playnite => playnite::playnite_root()
+            .and_then(|root| {
+                let exports = playnite::find_exports(&root);
+                exports
+                    .iter()
+                    .filter_map(|p| playnite::import_from(p).ok())
+                    .flatten()
+                    .find(|g| g.id == id)
+                    .and_then(|g| g.cover)
+                    .and_then(|c| playnite::resolve_cover(&root, &c))
+            })
+            .or_else(|| sgdb::last_used_artwork(&format!("playnite:{id}"))),
     };
 
     path.and_then(|p| read_as_data_uri(&p)).unwrap_or_default()
@@ -793,9 +797,9 @@ fn write_cover(root: &Path, request: &CartridgeRequest) -> Result<Option<PathBuf
     let source = match (&request.cover_source, &request.app_id, &request.playnite_id) {
         (Some(path), _, _) if !path.trim().is_empty() => PathBuf::from(path),
         (_, Some(app_id), _) if is_numeric(app_id) => {
-            let steam_root = steam::steam_root()
-                .ok_or_else(|| "no Steam installation to take the cover from".to_string())?;
-            match steam::find_cover(&steam_root, app_id) {
+            let local =
+                steam::steam_root().and_then(|steam_root| steam::find_cover(&steam_root, app_id));
+            match local.or_else(|| sgdb::last_used_artwork(&format!("steam:{app_id}"))) {
                 Some(p) => p,
                 None => return Ok(None),
             }
@@ -812,7 +816,10 @@ fn write_cover(root: &Path, request: &CartridgeRequest) -> Result<Option<PathBuf
                 .and_then(|c| playnite::resolve_cover(&root_dir, &c));
             match found {
                 Some(p) => p,
-                None => return Ok(None),
+                None => match sgdb::last_used_artwork(&format!("playnite:{playnite_id}")) {
+                    Some(p) => p,
+                    None => return Ok(None),
+                },
             }
         }
         _ => return Ok(None),

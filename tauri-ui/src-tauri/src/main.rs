@@ -35,7 +35,7 @@
 // All of the real work lives in cartridge-core, which has no UI dependency and
 // so can be tested without a webview. This file is the Tauri shell around it.
 use cartridge_core::cartridge::{self, CartridgeInfo};
-use cartridge_core::{create, drives, format};
+use cartridge_core::{create, drives, format, sgdb};
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -154,12 +154,14 @@ fn eject_drive(drive_path: String) -> Result<(), String> {
 fn eject_windows(drive_path: &str) -> Result<(), String> {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE,
+    };
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
-    use windows_sys::Win32::System::IO::DeviceIoControl;
     use windows_sys::Win32::System::Ioctl::{FSCTL_DISMOUNT_VOLUME, FSCTL_LOCK_VOLUME};
+    use windows_sys::Win32::System::IO::DeviceIoControl;
 
     let letter = drive_path.trim_end_matches('\\').trim_end_matches('/');
     let volume_path = format!("\\\\.\\{letter}");
@@ -252,9 +254,7 @@ fn eject_linux(drive_path: &str) -> Result<(), String> {
         .output()
         .map_err(|e| format!("findmnt failed: {e}"))?;
 
-    let device = String::from_utf8_lossy(&findmnt.stdout)
-        .trim()
-        .to_string();
+    let device = String::from_utf8_lossy(&findmnt.stdout).trim().to_string();
 
     if device.is_empty() {
         return Err(format!("Cannot find block device for {drive_path}"));
@@ -307,6 +307,37 @@ fn list_games(playnite_root: Option<String>) -> Result<Vec<create::GameInfo>, St
 #[tauri::command]
 fn game_cover(library: create::Library, id: String) -> String {
     create::game_cover(library, &id)
+}
+
+#[tauri::command]
+fn sgdb_search_games(query: String) -> Result<Vec<sgdb::SteamGridGame>, String> {
+    sgdb::search_games(&query)
+}
+
+#[tauri::command]
+fn sgdb_get_artwork(
+    game_id: u32,
+    art_type: sgdb::ArtworkType,
+) -> Result<Vec<sgdb::Artwork>, String> {
+    sgdb::get_artwork(game_id, art_type)
+}
+
+#[tauri::command]
+fn sgdb_download_artwork(
+    url: String,
+    cache_key: String,
+    game_key: Option<String>,
+) -> Result<String, String> {
+    let path = sgdb::download_artwork(&url, &cache_key)?;
+    if let Some(key) = game_key.filter(|k| !k.trim().is_empty()) {
+        sgdb::remember_last_used(&key, &path)?;
+    }
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn sgdb_last_used_artwork(game_key: String) -> Option<sgdb::CachedArtwork> {
+    sgdb::last_used_artwork_data_uri(&game_key)
 }
 
 #[tauri::command]
@@ -377,6 +408,10 @@ fn main() {
             eject_drive,
             list_games,
             game_cover,
+            sgdb_search_games,
+            sgdb_get_artwork,
+            sgdb_download_artwork,
+            sgdb_last_used_artwork,
             list_target_drives,
             format_plan,
             executable_choices,
