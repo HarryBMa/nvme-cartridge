@@ -7,7 +7,6 @@
   },
   "app": {
     "withGlobalTauri": true,
-    "_comment": "No windows are declared here on purpose. main() looks at the arguments and builds exactly one — the popup or the wizard — so neither mode allocates a webview the user is not looking at.",
     "windows": [],
     "security": {
       "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'",
