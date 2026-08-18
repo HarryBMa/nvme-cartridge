@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::drives::{self, TargetDrive};
-use crate::{autorun, format, playnite, steam, steamlib};
+use crate::{autorun, format, playnite, portable, steam, steamlib};
 
 /// Largest cover we will copy onto a cartridge.
 const MAX_COVER_BYTES: u64 = 8 * 1024 * 1024;
@@ -84,9 +84,17 @@ pub struct CartridgeRequest {
     pub format_label: Option<String>,
     #[serde(default)]
     pub format_confirmation: Option<String>,
-    /// Copy the game's files onto the cartridge and register it with Steam.
+    /// Copy the game's files onto the cartridge.
+    ///
+    /// For a Steam game that also registers the drive as a Steam library. For
+    /// anything else the folder is copied and `executable` is rewritten to point
+    /// inside it.
     #[serde(default)]
     pub copy_game: bool,
+    /// Which file inside the copied folder Play should start, relative to the
+    /// game's install directory. Only used for non-Steam games.
+    #[serde(default)]
+    pub copy_executable: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -109,6 +117,8 @@ pub struct CartridgeResult {
     pub game_copied: bool,
     pub bytes_copied: u64,
     pub registered_with_steam: bool,
+    /// Where the game was copied to, relative to the cartridge root.
+    pub game_folder: Option<String>,
     pub warnings: Vec<String>,
 }
 
@@ -184,10 +194,9 @@ fn playnite_games() -> Result<Vec<GameInfo>, String> {
                 .as_deref()
                 .and_then(|c| playnite::resolve_cover(&root, c))
                 .is_some(),
-            // Playnite knows where non-Steam games live, but copying them only
-            // helps when the game is portable; Steam titles go through the
-            // Steam library path instead.
-            can_copy: false,
+            // Anything Playnite knows the install directory for can be copied
+            // wholesale; Play then points at a file on the cartridge.
+            can_copy: g.install_dir.is_some(),
             id: g.id,
             name: g.name,
             library: Library::Playnite,
@@ -292,6 +301,7 @@ pub fn create_cartridge(
         game_copied: false,
         bytes_copied: 0,
         registered_with_steam: false,
+        game_folder: None,
         warnings: Vec::new(),
     };
 
@@ -327,18 +337,25 @@ pub fn create_cartridge(
         wait_for_mount(&root);
     }
 
-    // The executable is validated after any format, because a path-on-cartridge
-    // target has to exist on the drive as it is now.
-    let executable = sanitize_conf_value(&request.executable);
-    validate_executable(&executable, &root)?;
+    // ---- 2. Copy the game -----------------------------------------------
+    //
+    // Before validating the executable, because a generic copy *creates* the
+    // file that Play will point at: the target does not exist on the cartridge
+    // until the folder has been copied across.
+    let mut executable = sanitize_conf_value(&request.executable);
 
-    // ---- 2. Copy the game and register it -------------------------------
     if request.copy_game {
-        match copy_steam_game(request, &root, progress) {
-            Ok(Some((bytes, registered))) => {
+        match copy_game(request, &root, progress) {
+            Ok(Some(copied)) => {
                 result.game_copied = true;
-                result.bytes_copied = bytes;
-                result.registered_with_steam = registered;
+                result.bytes_copied = copied.bytes;
+                result.registered_with_steam = copied.registered_with_steam;
+                result.game_folder = copied.folder.clone();
+                // A generic copy replaces the launch target with a path on the
+                // cartridge; a Steam copy keeps its steam:// URI.
+                if let Some(on_cartridge) = copied.executable {
+                    executable = on_cartridge;
+                }
             }
             Ok(None) => {}
             Err(e) => {
@@ -348,7 +365,10 @@ pub fn create_cartridge(
         }
     }
 
-    // ---- 3. Cover art ---------------------------------------------------
+    // ---- 3. Check what Play will start -----------------------------------
+    validate_executable(&executable, &root)?;
+
+    // ---- 4. Cover art ---------------------------------------------------
     progress(Progress {
         step: "cover",
         message: "Copying cover art…".to_string(),
@@ -365,7 +385,7 @@ pub fn create_cartridge(
     };
     result.cover_written = cover_destination.is_some();
 
-    // ---- 4. cartridge.conf ----------------------------------------------
+    // ---- 5. cartridge.conf ----------------------------------------------
     let conf = render_cartridge_conf(
         &title,
         &executable,
@@ -379,7 +399,7 @@ pub fn create_cartridge(
         .map_err(|e| format!("Could not write {}: {e}", conf_path.display()))?;
     result.conf_path = conf_path.to_string_lossy().into_owned();
 
-    // ---- 5. autorun.inf --------------------------------------------------
+    // ---- 6. autorun.inf --------------------------------------------------
     progress(Progress {
         step: "autorun",
         message: "Naming the drive…".to_string(),
@@ -413,6 +433,191 @@ pub fn create_cartridge(
     Ok(result)
 }
 
+/// What a copy produced.
+struct Copied {
+    bytes: u64,
+    /// Set when the launch target moved onto the cartridge.
+    executable: Option<String>,
+    /// Where the files landed, relative to the cartridge root.
+    folder: Option<String>,
+    registered_with_steam: bool,
+}
+
+/// Copy the game, by whichever route suits where it came from.
+///
+/// Steam games go through the library mechanism, because `steam://rungameid`
+/// launches whatever copy Steam knows about and a loose folder would be ignored.
+/// Everything else is a plain folder copy with Play pointed inside it, which is
+/// the simpler and more honest arrangement — the cartridge really does carry the
+/// game, with no launcher in the middle.
+fn copy_game(
+    request: &CartridgeRequest,
+    root: &Path,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<Option<Copied>, String> {
+    if request.app_id.as_deref().is_some_and(is_numeric) {
+        return copy_steam_game(request, root, progress);
+    }
+    copy_portable_game(request, root, progress)
+}
+
+/// Copy a self-contained game folder onto the cartridge.
+fn copy_portable_game(
+    request: &CartridgeRequest,
+    root: &Path,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<Option<Copied>, String> {
+    let Some(source) = portable_source(request)? else {
+        return Ok(None);
+    };
+
+    if !source.is_dir() {
+        return Err(format!("{} is not there any more", source.display()));
+    }
+
+    let title = sanitize_conf_value(&request.title);
+    let folder_name = portable::safe_folder_name(&title);
+    // Everything the wizard copies lives under Games/, so the cartridge root
+    // stays readable next to cartridge.conf and the cover.
+    let relative_folder = format!("Games/{folder_name}");
+    let destination = root.join("Games").join(&folder_name);
+
+    let total = portable::tree_size_of(&source);
+    let free = drives::list_drives()
+        .into_iter()
+        .find(|d| Path::new(&d.path) == root)
+        .map(|d| d.free_bytes)
+        .unwrap_or(0);
+    if total > free {
+        return Err(steamlib::LibraryError::NotEnoughSpace {
+            needed: total,
+            free,
+        }
+        .to_string());
+    }
+
+    // Decide what Play will run *before* copying, so a bad choice costs nothing.
+    let chosen = choose_portable_executable(request, &source, &title)?;
+
+    progress(Progress {
+        step: "copy",
+        message: format!("Copying {title}…"),
+        done_bytes: 0,
+        total_bytes: total,
+    });
+
+    let name = title.clone();
+    let bytes = steamlib::copy_tree(&source, &destination, &mut |done| {
+        progress(Progress {
+            step: "copy",
+            message: format!("Copying {name}…"),
+            done_bytes: done,
+            total_bytes: total,
+        });
+    })
+    .map_err(|e| format!("{}: {e}", source.display()))?;
+
+    Ok(Some(Copied {
+        bytes,
+        executable: Some(format!("{relative_folder}/{chosen}")),
+        folder: Some(relative_folder),
+        registered_with_steam: false,
+    }))
+}
+
+/// Where a non-Steam game's files currently live.
+fn portable_source(request: &CartridgeRequest) -> Result<Option<PathBuf>, String> {
+    let Some(playnite_id) = request.playnite_id.as_deref() else {
+        return Ok(None);
+    };
+    let root = playnite::playnite_root()
+        .ok_or_else(|| "could not find Playnite, so there is no install directory".to_string())?;
+
+    let game = playnite::find_exports(&root)
+        .iter()
+        .filter_map(|p| playnite::import_from(p).ok())
+        .flatten()
+        .find(|g| g.id == playnite_id)
+        .ok_or_else(|| "that game is no longer in the Playnite export".to_string())?;
+
+    match game.install_dir {
+        Some(dir) => Ok(Some(dir)),
+        None => Err("Playnite does not record an install directory for it".to_string()),
+    }
+}
+
+/// The path inside the game folder that Play should start.
+///
+/// The caller's choice is honoured if it is a real file that stays inside the
+/// folder; otherwise the best-ranked candidate is used.
+fn choose_portable_executable(
+    request: &CartridgeRequest,
+    source: &Path,
+    title: &str,
+) -> Result<String, String> {
+    if let Some(chosen) = request.copy_executable.as_deref().map(str::trim) {
+        if !chosen.is_empty() {
+            // The window supplied this, so it is checked the same way a
+            // cartridge-supplied path would be.
+            let relative = chosen.replace('\\', "/");
+            if relative
+                .split('/')
+                .any(|part| part == ".." || part.is_empty())
+                || Path::new(&relative).is_absolute()
+                || relative.contains(':')
+            {
+                return Err(format!("{chosen} is not a path inside the game folder"));
+            }
+            if !source.join(&relative).is_file() {
+                return Err(format!("{chosen} is not in the game folder"));
+            }
+            return Ok(relative);
+        }
+    }
+
+    let play_action = playnite_play_action(request);
+    portable::find_executables(source, title, play_action.as_deref())
+        .into_iter()
+        .next()
+        .map(|c| c.relative)
+        .ok_or_else(|| {
+            "no program found in the game folder, so there would be nothing for Play to start"
+                .to_string()
+        })
+}
+
+fn playnite_play_action(request: &CartridgeRequest) -> Option<String> {
+    let playnite_id = request.playnite_id.as_deref()?;
+    let root = playnite::playnite_root()?;
+    playnite::find_exports(&root)
+        .iter()
+        .filter_map(|p| playnite::import_from(p).ok())
+        .flatten()
+        .find(|g| g.id == playnite_id)
+        .and_then(|g| g.play_action)
+}
+
+/// Candidates for what Play should start, best guess first.
+pub fn executable_choices(playnite_id: &str) -> Result<Vec<portable::Candidate>, String> {
+    let root = playnite::playnite_root().ok_or_else(|| "Could not find Playnite.".to_string())?;
+    let game = playnite::find_exports(&root)
+        .iter()
+        .filter_map(|p| playnite::import_from(p).ok())
+        .flatten()
+        .find(|g| g.id == playnite_id)
+        .ok_or_else(|| "That game is no longer in the Playnite export.".to_string())?;
+
+    let dir = game
+        .install_dir
+        .ok_or_else(|| "Playnite does not record an install directory for it.".to_string())?;
+
+    Ok(portable::find_executables(
+        &dir,
+        &game.name,
+        game.play_action.as_deref(),
+    ))
+}
+
 /// Copy a Steam game onto the cartridge and register it as a Steam library.
 ///
 /// Returns the bytes copied and whether Steam was told about the drive, or
@@ -421,7 +626,7 @@ fn copy_steam_game(
     request: &CartridgeRequest,
     root: &Path,
     progress: &mut dyn FnMut(Progress),
-) -> Result<Option<(u64, bool)>, String> {
+) -> Result<Option<Copied>, String> {
     let Some(app_id) = request.app_id.as_deref().filter(|id| is_numeric(id)) else {
         return Ok(None);
     };
@@ -503,7 +708,14 @@ fn copy_steam_game(
         .map_err(|e| e.to_string())?
         .is_some();
 
-    Ok(Some((copied, registered)))
+    Ok(Some(Copied {
+        bytes: copied,
+        // Steam launches by app id wherever the library lives, so the launch
+        // target is unchanged.
+        executable: None,
+        folder: Some("steamapps/common".to_string()),
+        registered_with_steam: registered,
+    }))
 }
 
 /// After a format the mount point can briefly disappear.
@@ -795,6 +1007,65 @@ mod tests {
         assert!(err.contains("not a removable drive"), "{err}");
         // Crucially, it bailed before the format step emitted anything.
         assert!(seen.is_empty(), "{seen:?}");
+    }
+
+    #[test]
+    fn a_supplied_executable_must_stay_inside_the_game_folder() {
+        let scratch = crate::testutil::Scratch::new("chosen");
+        scratch.write("Game.exe", b"x");
+        scratch.write("bin/run.exe", b"x");
+
+        let pick = |chosen: &str| {
+            let request = CartridgeRequest {
+                title: "Game".into(),
+                copy_executable: Some(chosen.to_string()),
+                ..Default::default()
+            };
+            choose_portable_executable(&request, scratch.path(), "Game")
+        };
+
+        assert_eq!(pick("Game.exe").unwrap(), "Game.exe");
+        // Backslashes are normalised, since the window may send either.
+        assert_eq!(pick("bin\\run.exe").unwrap(), "bin/run.exe");
+
+        // The window is not trusted with a path any more than a cartridge is.
+        for bad in [
+            "../../../etc/passwd",
+            "bin/../../escape.exe",
+            "/usr/bin/bash",
+            "C:\\Windows\\System32\\cmd.exe",
+            "missing.exe",
+        ] {
+            assert!(pick(bad).is_err(), "{bad} should have been refused");
+        }
+    }
+
+    #[test]
+    fn without_a_choice_the_best_candidate_is_used() {
+        let scratch = crate::testutil::Scratch::new("auto");
+        scratch.write("unins000.exe", b"x");
+        scratch.write("Hollow Knight.exe", b"x");
+
+        let request = CartridgeRequest {
+            title: "Hollow Knight".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            choose_portable_executable(&request, scratch.path(), "Hollow Knight").unwrap(),
+            "Hollow Knight.exe"
+        );
+    }
+
+    #[test]
+    fn a_folder_with_nothing_runnable_is_an_error_not_a_guess() {
+        let scratch = crate::testutil::Scratch::new("norun");
+        scratch.write("data.pak", b"x");
+        let request = CartridgeRequest {
+            title: "Empty".into(),
+            ..Default::default()
+        };
+        let err = choose_portable_executable(&request, scratch.path(), "Empty").unwrap_err();
+        assert!(err.contains("nothing for Play to start"), "{err}");
     }
 
     #[test]

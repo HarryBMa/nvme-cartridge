@@ -7,9 +7,10 @@
  *   game_cover({ library, id })      -> "data:image/…" | ""
  *   list_target_drives()             -> [{ path, label, totalBytes, freeBytes, hasCartridge }]
  *   format_plan({ drivePath })       -> { path, currentLabel, device, totalBytes, warning }
+ *   executable_choices({ playniteId }) -> [{ relative, name, score }]  best first
  *   create_cartridge({ request })    -> { confPath, coverWritten, autorunWritten, icon,
  *                                          formatted, gameCopied, bytesCopied,
- *                                          registeredWithSteam, warnings }
+ *                                          registeredWithSteam, gameFolder, warnings }
  *
  * The backend re-derives the list of writable drives and re-checks the format
  * confirmation itself, so nothing here can talk it into writing to the wrong
@@ -35,6 +36,9 @@ const el = {
   drivesEmpty: document.getElementById("drives-empty"),
   optCopy: document.getElementById("opt-copy"),
   optCopyHint: document.getElementById("opt-copy-hint"),
+  exePick: document.getElementById("exe-pick"),
+  exeChoices: document.getElementById("exe-choices"),
+  exeHint: document.getElementById("exe-hint"),
   optFormat: document.getElementById("opt-format"),
   formatFields: document.getElementById("format-fields"),
   formatLabel: document.getElementById("format-label"),
@@ -59,6 +63,8 @@ let manualMode = false;
 /** What the backend says formatting the chosen drive would destroy. */
 let formatPlan = null;
 let building = false;
+/** Candidates for what Play should start, when copying a non-Steam game. */
+let exeCandidates = [];
 
 /* ========================================================================== */
 
@@ -245,17 +251,71 @@ async function selectDrive(drive) {
 /* ---------------------------------------------------------------- options */
 
 function refreshOptions() {
-  // Copying only does something useful for a Steam game, where the cartridge can
-  // be registered as a Steam library.
   const copyable = !manualMode && Boolean(selectedGame?.canCopy);
   el.optCopy.disabled = !copyable;
   if (!copyable) el.optCopy.checked = false;
 
+  // The two routes differ enough to be worth saying which one applies.
+  const isSteam = selectedGame?.library === "steam";
   el.optCopyHint.textContent = copyable
-    ? "Also registers the drive as a Steam library, so Steam plays from the cartridge instead of your internal copy."
+    ? isSteam
+      ? "Also registers the drive as a Steam library, so Steam plays from the cartridge instead of your internal copy."
+      : "Copies the game's folder onto the cartridge and points Play at a file inside it. No launcher needed."
     : manualMode
       ? "Only available for a game picked from the list."
-      : "Only Steam games can be copied; this one launches through its own launcher.";
+      : "Playnite does not record where this one is installed, so there is nothing to copy.";
+
+  refreshExePicker();
+}
+
+/**
+ * A non-Steam copy needs to know which file to run, so the choice is made here
+ * rather than guessed at silently. Steam copies do not need it: the app id
+ * already identifies the game wherever the library lives.
+ */
+async function refreshExePicker() {
+  const needed =
+    el.optCopy.checked && !manualMode && selectedGame && selectedGame.library !== "steam";
+
+  el.exePick.hidden = !needed;
+  if (!needed) {
+    exeCandidates = [];
+    return;
+  }
+
+  el.exeChoices.replaceChildren();
+  el.exeHint.textContent = "Looking for the game's program…";
+
+  try {
+    exeCandidates = await invoke("executable_choices", { playniteId: selectedGame.id });
+  } catch (error) {
+    exeCandidates = [];
+    el.exeHint.textContent = String(error);
+    refreshCreateButton();
+    return;
+  }
+
+  if (exeCandidates.length === 0) {
+    el.exeHint.textContent =
+      "Nothing runnable found in the game's folder, so it cannot be copied.";
+    refreshCreateButton();
+    return;
+  }
+
+  for (const candidate of exeCandidates) {
+    const option = document.createElement("option");
+    option.value = candidate.relative;
+    option.textContent = candidate.relative;
+    el.exeChoices.append(option);
+  }
+  // The list arrives best-first, so the default is already the best guess.
+  el.exeChoices.value = exeCandidates[0].relative;
+  el.exeHint.textContent =
+    exeCandidates.length === 1
+      ? "One program found."
+      : `Best guess of ${exeCandidates.length} found. Change it if that is the wrong one.`;
+
+  refreshCreateButton();
 }
 
 function refreshFormatFields() {
@@ -321,6 +381,11 @@ function refreshCreateButton() {
   const want = intent();
   let ok = Boolean(want && want.title && want.executable && selectedDrive);
 
+  // A non-Steam copy has nothing to point Play at until a program is chosen.
+  if (ok && !el.exePick.hidden && exeCandidates.length === 0) {
+    ok = false;
+  }
+
   // Formatting must be confirmed before Write is even offered.
   if (ok && el.optFormat.checked) {
     const typed = el.formatConfirm.value.trim();
@@ -378,13 +443,20 @@ async function writeCartridge() {
         formatLabel: el.formatLabel.value.trim() || null,
         formatConfirmation: el.formatConfirm.value.trim() || null,
         copyGame: el.optCopy.checked,
+        copyExecutable: el.exePick.hidden ? null : el.exeChoices.value || null,
       },
     });
 
     const drive = drives.find((d) => d.path === selectedDrive);
     const parts = [`Cartridge written to ${drive ? drive.label : selectedDrive}.`];
     if (result.formatted) parts.push("Formatted to exFAT.");
-    if (result.gameCopied) parts.push(`Copied ${formatBytes(result.bytesCopied)}.`);
+    if (result.gameCopied) {
+      parts.push(
+        result.gameFolder
+          ? `Copied ${formatBytes(result.bytesCopied)} to ${result.gameFolder}.`
+          : `Copied ${formatBytes(result.bytesCopied)}.`,
+      );
+    }
     if (result.registeredWithSteam) parts.push("Registered with Steam.");
     if (result.coverWritten) parts.push("Cover art copied.");
     if (result.icon) parts.push("Drive icon set.");
@@ -445,6 +517,11 @@ el.customTitle.addEventListener("input", () => {
   if (el.optFormat.checked && !el.formatLabel.value) refreshFormatFields();
 });
 el.customExec.addEventListener("input", refreshCreateButton);
+el.optCopy.addEventListener("change", () => {
+  refreshExePicker();
+  refreshCreateButton();
+});
+el.exeChoices.addEventListener("change", refreshCreateButton);
 el.optFormat.addEventListener("change", () => {
   refreshFormatFields();
   refreshCreateButton();
@@ -516,8 +593,8 @@ async function demoInvoke(command, args) {
           sizeOnDisk: 15_204_593_664, hasCover: false,
           executable: "steam://rungameid/1145360", canCopy: true },
         { id: "b7f3-tunic", name: "Tunic", library: "playnite", source: "GOG",
-          sizeOnDisk: 0, hasCover: false,
-          executable: "playnite://playnite/start/b7f3-tunic", canCopy: false },
+          sizeOnDisk: 3_221_225_472, hasCover: false,
+          executable: "playnite://playnite/start/b7f3-tunic", canCopy: true },
         { id: "c8a1-outer", name: "Outer Wilds", library: "playnite", source: "Epic",
           sizeOnDisk: 0, hasCover: false,
           executable: "playnite://playnite/start/c8a1-outer", canCopy: false },
@@ -540,6 +617,12 @@ async function demoInvoke(command, args) {
         { path: "/run/media/harry/HOLLOW", label: "HOLLOW",
           totalBytes: 128_035_676_160, freeBytes: 18_253_611_008, hasCartridge: true },
       ];
+    case "executable_choices":
+      return [
+        { relative: "TUNIC.exe", name: "TUNIC.exe", score: 120 },
+        { relative: "bin/launcher.exe", name: "launcher.exe", score: -40 },
+        { relative: "unins000.exe", name: "unins000.exe", score: -400 },
+      ];
     case "steam_registration":
       return args.drivePath.endsWith("HOLLOW");
     case "unregister_from_steam":
@@ -561,7 +644,12 @@ async function demoInvoke(command, args) {
         formatted: args.request.formatDrive,
         gameCopied: args.request.copyGame,
         bytesCopied: args.request.copyGame ? 9_106_886_656 : 0,
-        registeredWithSteam: args.request.copyGame,
+        registeredWithSteam: args.request.copyGame && Boolean(args.request.appId),
+        gameFolder: args.request.copyGame
+          ? args.request.appId
+            ? "steamapps/common"
+            : "Games/Tunic"
+          : null,
         warnings: [],
       };
     default:

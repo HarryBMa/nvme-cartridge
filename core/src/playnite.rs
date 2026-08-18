@@ -34,6 +34,12 @@ pub struct PlayniteGame {
     pub is_installed: bool,
     /// Seconds, as Playnite records it.
     pub playtime: u64,
+    /// The `Path` of the game's play action, when the export carries one.
+    ///
+    /// Playnite knows exactly which file it launches, so this beats any guess
+    /// made by scanning the install directory. It may be relative to
+    /// `install_dir` or absolute, and is often a bare filename.
+    pub play_action: Option<String>,
 }
 
 impl PlayniteGame {
@@ -153,6 +159,19 @@ struct RawGame {
     /// Playnite marks DLC and similar as hidden; they are not cartridges.
     #[serde(default, alias = "hidden", alias = "Hidden")]
     hidden: Option<bool>,
+    #[serde(default, alias = "gameActions", alias = "GameActions")]
+    game_actions: Option<Vec<RawAction>>,
+}
+
+/// One entry of Playnite's `GameActions`.
+#[derive(Debug, Deserialize)]
+struct RawAction {
+    #[serde(default, alias = "path", alias = "Path")]
+    path: Option<String>,
+    #[serde(default, alias = "isPlayAction", alias = "IsPlayAction")]
+    is_play_action: Option<bool>,
+    #[serde(default, alias = "type", alias = "Type")]
+    kind: Option<Named>,
 }
 
 #[derive(Debug)]
@@ -239,9 +258,31 @@ pub fn parse_export(json: &str) -> Result<Vec<PlayniteGame>, ImportError> {
             })
             .unwrap_or_default();
 
+        // Prefer the action Playnite marks as the play action; failing that, one
+        // typed as a file; failing that, the first with a path at all.
+        let actions = game.game_actions.unwrap_or_default();
+        let play_action = actions
+            .iter()
+            .find(|a| a.is_play_action.unwrap_or(false) && a.path.is_some())
+            .or_else(|| {
+                actions.iter().find(|a| {
+                    a.kind
+                        .as_ref()
+                        .and_then(Named::name)
+                        .map(|k| k.eq_ignore_ascii_case("File"))
+                        .unwrap_or(false)
+                        && a.path.is_some()
+                })
+            })
+            .or_else(|| actions.iter().find(|a| a.path.is_some()))
+            .and_then(|a| a.path.clone())
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty());
+
         out.push(PlayniteGame {
             id,
             name,
+            play_action,
             source,
             install_dir: game
                 .install_directory

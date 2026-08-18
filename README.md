@@ -125,9 +125,15 @@ Pick a game, pick the drive, choose what goes on it, press Write. The wizard can
 - **name the drive** — an `autorun.inf` with `label=`, so Explorer shows
   "HOLLOW KNIGHT" instead of "Removable Disk (D:)", and `icon=` when a usable
   `.ico` can be produced;
-- **copy the game onto the cartridge** and register the drive in Steam's
-  `libraryfolders.vdf`, so Steam plays *from* the cartridge rather than your
-  internal copy. Close Steam first — it rewrites that file on exit;
+- **copy the game onto the cartridge**, by whichever route suits it:
+  - *Steam games* go into `steamapps/` and the drive is registered in Steam's
+    `libraryfolders.vdf`, so Steam plays *from* the cartridge rather than your
+    internal copy. Close Steam first — it rewrites that file on exit.
+  - *Everything else* (GOG, itch, emulator builds, anything Playnite knows the
+    install folder for) is copied to `Games/<title>/` and Play is pointed at a
+    file inside it. No launcher in the middle: the cartridge really does carry
+    the game. The wizard ranks the executables it finds and offers the best
+    guess, which you can change;
 - **format the drive to exFAT**, off by default.
 
 Games not in any library can be entered by hand with any supported URI.
@@ -163,7 +169,13 @@ exactly. That is the entire cartridge:
 NVME-DRIVE/
 ├── cartridge.conf
 ├── cover.jpg
-└── SteamLibrary/        (optional — the game itself can live here)
+├── autorun.inf          (written by the wizard: drive name and icon)
+├── Games/               (a copied non-Steam game)
+│   └── Tunic/
+│       └── TUNIC.exe
+└── steamapps/           (a copied Steam game)
+    ├── appmanifest_367520.acf
+    └── common/Hollow Knight/
 ```
 
 Then unplug it and plug it back in.

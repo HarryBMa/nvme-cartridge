@@ -18,6 +18,7 @@ pub mod create;
 pub mod drives;
 pub mod format;
 pub mod playnite;
+pub mod portable;
 pub mod steam;
 pub mod steamlib;
 

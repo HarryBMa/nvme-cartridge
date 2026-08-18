@@ -19,6 +19,7 @@
 //   game_cover(library, id)                  -> String (data URI)
 //   list_target_drives()                     -> Vec<TargetDrive>
 //   format_plan(drive_path)                  -> FormatPlan
+//   executable_choices(playnite_id)          -> Vec<Candidate>
 //   steam_registration(drive_path)           -> bool
 //   unregister_from_steam(drive_path)        -> bool
 //   create_cartridge(request)                -> CartridgeResult,
@@ -316,6 +317,16 @@ fn format_plan(drive_path: String) -> Result<format::FormatPlan, String> {
     create::format_plan(&drive_path)
 }
 
+/// What Play could start, for a game whose folder is about to be copied.
+///
+/// Ranked best-first; the window offers the top one and lets the user change it.
+#[tauri::command]
+fn executable_choices(
+    playnite_id: String,
+) -> Result<Vec<cartridge_core::portable::Candidate>, String> {
+    create::executable_choices(&playnite_id)
+}
+
 /// Whether the drive is currently a registered Steam library folder.
 #[tauri::command]
 fn steam_registration(drive_path: String) -> bool {
@@ -365,6 +376,7 @@ fn main() {
             game_cover,
             list_target_drives,
             format_plan,
+            executable_choices,
             steam_registration,
             unregister_from_steam,
             create_cartridge,
