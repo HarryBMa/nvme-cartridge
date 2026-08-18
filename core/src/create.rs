@@ -2,7 +2,7 @@
 //!
 //! The full build, in order, each step optional except the last two:
 //!
-//!   1. format the drive to exFAT              (opt in, destructive)
+//!   1. format the drive to btrfs              (opt in, destructive)
 //!   2. copy the game onto it and register the
 //!      cartridge as a Steam library           (opt in, slow)
 //!   3. copy the cover art
@@ -93,7 +93,7 @@ pub struct CartridgeRequest {
     /// Absolute path to a user-chosen cover image instead.
     #[serde(default)]
     pub cover_source: Option<String>,
-    /// Format to exFAT first. `format_confirmation` must match the drive's
+    /// Format to btrfs first. `format_confirmation` must match the drive's
     /// current label or nothing happens.
     #[serde(default)]
     pub format_drive: bool,
@@ -371,12 +371,12 @@ pub fn create_cartridge(
 
         progress(Progress {
             step: "format",
-            message: format!("Formatting {} to exFAT…", request.drive_path),
+            message: format!("Formatting {} to btrfs…", request.drive_path),
             done_bytes: 0,
             total_bytes: 0,
         });
 
-        format::format_exfat(&request.drive_path, &label, &confirmation)
+        format::format_btrfs(&request.drive_path, &label, &confirmation)
             .map_err(|e| e.to_string())?;
         result.formatted = true;
 
@@ -874,7 +874,7 @@ fn wait_for_mount(root: &Path) {
     }
 }
 
-/// A default exFAT volume name derived from the title.
+/// A default btrfs volume label derived from the title.
 pub fn default_label(title: &str) -> String {
     let cleaned: String = title
         .chars()
@@ -884,10 +884,10 @@ pub fn default_label(title: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ");
 
-    let truncated: String = cleaned.chars().take(11).collect();
-    let trimmed = truncated.trim().to_uppercase();
+    let truncated: String = cleaned.chars().take(64).collect();
+    let trimmed = truncated.trim().to_string();
     if trimmed.is_empty() {
-        "CARTRIDGE".to_string()
+        "Cartridge".to_string()
     } else {
         trimmed
     }
@@ -1286,11 +1286,11 @@ mod tests {
     }
 
     #[test]
-    fn derives_a_valid_exfat_label_from_a_title() {
-        assert_eq!(default_label("Hollow Knight"), "HOLLOW KNIG");
-        assert_eq!(default_label("Cinder & Salt"), "CINDER SALT");
-        assert_eq!(default_label("!!!"), "CARTRIDGE");
-        assert_eq!(default_label(""), "CARTRIDGE");
+    fn derives_a_valid_btrfs_label_from_a_title() {
+        assert_eq!(default_label("Hollow Knight"), "Hollow Knight");
+        assert_eq!(default_label("Cinder & Salt"), "Cinder Salt");
+        assert_eq!(default_label("!!!"), "Cartridge");
+        assert_eq!(default_label(""), "Cartridge");
         // Whatever it produces must pass the formatter's own check.
         for title in ["Hollow Knight", "Cinder & Salt", "!!!", "", "A"] {
             let label = default_label(title);

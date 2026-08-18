@@ -838,7 +838,7 @@ async function writeCartridge() {
 
     const drive = drives.find((d) => d.path === selectedDrive);
     const parts = [`Cartridge written to ${drive ? drive.label : selectedDrive}.`];
-    if (result.formatted) parts.push("Formatted to exFAT.");
+    if (result.formatted) parts.push("Formatted to btrfs.");
     if (result.gameCopied) {
       parts.push(
         result.gameFolder

@@ -1,4 +1,4 @@
-//! Formatting a drive to exFAT.
+//! Formatting a drive to btrfs.
 //!
 //! This is the only code in the project that destroys data, so it is built to
 //! refuse rather than to succeed. Four things must all hold before a single
@@ -10,17 +10,18 @@
 //!   3. the caller echoed the drive's current label back exactly;
 //!   4. formatting was explicitly asked for, per cartridge. It is never implied.
 //!
-//! exFAT because a cartridge should work on both Windows and Linux, and because
-//! it has no ownership or permission model to get in the way of a drive that
-//! moves between machines.
+//! btrfs because it supports TRIM (discard=async mount option) and transparent
+//! zstd compression, which meaningfully improve the lifespan and effective
+//! capacity of NVMe drives. It works on Linux natively and on Windows via
+//! WinBtrfs (https://github.com/maharmstone/btrfs).
 
 use std::path::Path;
 use std::process::Command;
 
 use crate::drives;
 
-/// A label longer than this is not valid exFAT.
-const MAX_LABEL: usize = 11;
+/// A label longer than this is not valid btrfs.
+const MAX_LABEL: usize = 256;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum FormatError {
@@ -49,7 +50,7 @@ impl std::fmt::Display for FormatError {
             ),
             FormatError::BadLabel(l) => write!(
                 f,
-                "{l:?} is not a usable exFAT name. Use up to {MAX_LABEL} characters, \
+                "{l:?} is not a usable btrfs label. Use up to {MAX_LABEL} characters, \
                  letters, digits, spaces, - or _."
             ),
             FormatError::NoDevice(p) => {
@@ -58,7 +59,7 @@ impl std::fmt::Display for FormatError {
             FormatError::ToolMissing(t) => write!(
                 f,
                 "{t} is not installed, so the drive cannot be formatted here. \
-                 Format it to exFAT yourself and run the wizard again."
+                 Format it to btrfs yourself and run the wizard again."
             ),
             FormatError::Failed(m) => write!(f, "Formatting failed: {m}"),
         }
@@ -78,7 +79,7 @@ pub struct FormatPlan {
     pub warning: String,
 }
 
-/// Validate a proposed exFAT volume name.
+/// Validate a proposed btrfs volume label.
 pub fn check_label(label: &str) -> Result<String, FormatError> {
     let trimmed = label.trim();
     if trimmed.is_empty() || trimmed.len() > MAX_LABEL {
@@ -91,7 +92,7 @@ pub fn check_label(label: &str) -> Result<String, FormatError> {
     {
         return Err(FormatError::BadLabel(label.to_string()));
     }
-    Ok(trimmed.to_uppercase())
+    Ok(trimmed.to_string())
 }
 
 /// Describe what formatting `path` would destroy, refusing anything ineligible.
@@ -126,7 +127,7 @@ pub fn plan(path: &str) -> Result<FormatPlan, FormatError> {
 /// `confirmation` must equal the drive's current label. That is the gate: it
 /// forces the user to look at which drive they picked, rather than clicking
 /// through a dialog.
-pub fn format_exfat(path: &str, new_label: &str, confirmation: &str) -> Result<(), FormatError> {
+pub fn format_btrfs(path: &str, new_label: &str, confirmation: &str) -> Result<(), FormatError> {
     let plan = plan(path)?;
     let label = check_label(new_label)?;
 
@@ -215,9 +216,10 @@ fn run_format(plan: &FormatPlan, label: &str) -> Result<(), FormatError> {
 
     // Format-Volume needs administrator, so it is elevated on its own rather
     // than requiring the whole wizard to run as admin.
+    // WinBtrfs (https://github.com/maharmstone/btrfs) must be installed.
     let script = format!(
         "$ErrorActionPreference='Stop'; \
-         Format-Volume -DriveLetter {} -FileSystem exFAT -NewFileSystemLabel '{}' \
+         Format-Volume -DriveLetter {} -FileSystem Btrfs -NewFileSystemLabel '{}' \
          -Confirm:$false -Force",
         letter.trim_end_matches(':'),
         label.replace('\'', "''")
@@ -296,8 +298,8 @@ pub fn mkfs_command(device: &str, label: &str) -> (&'static str, Vec<String>) {
     (
         "pkexec",
         vec![
-            "mkfs.exfat".to_string(),
-            "-n".to_string(),
+            "mkfs.btrfs".to_string(),
+            "-L".to_string(),
             label.to_string(),
             device.to_string(),
         ],
@@ -309,19 +311,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn accepts_sensible_labels_and_upper_cases_them() {
-        assert_eq!(check_label("cinder").unwrap(), "CINDER");
-        assert_eq!(check_label("  Hollow ").unwrap(), "HOLLOW");
+    fn accepts_sensible_labels_and_preserves_case() {
+        assert_eq!(check_label("cinder").unwrap(), "cinder");
+        assert_eq!(check_label("  Hollow ").unwrap(), "Hollow");
         assert_eq!(check_label("CART_01").unwrap(), "CART_01");
         assert_eq!(check_label("MY CART").unwrap(), "MY CART");
     }
 
     #[test]
-    fn refuses_labels_exfat_cannot_hold() {
+    fn refuses_labels_btrfs_cannot_hold() {
         for bad in [
             "",
             "   ",
-            "THIS_IS_FAR_TOO_LONG",
             "bad/slash",
             "quote\"mark",
             "semi;colon",
@@ -332,9 +333,11 @@ mod tests {
                 "{bad:?}"
             );
         }
-        // Exactly at the limit is fine; one over is not.
+        // Short labels are fine; a label exactly at the limit is fine too.
         assert!(check_label("ELEVENCHARS").is_ok());
-        assert!(check_label("TWELVECHARSX").is_err());
+        assert!(check_label("TWELVECHARSX").is_ok());
+        // A label over 256 characters must be rejected.
+        assert!(check_label(&"A".repeat(257)).is_err());
     }
 
     #[test]
@@ -356,7 +359,7 @@ mod tests {
     #[test]
     fn format_refuses_before_confirmation_is_even_checked() {
         // An ineligible drive fails on eligibility, not on the label.
-        let err = format_exfat("/", "CART", "anything").unwrap_err();
+        let err = format_btrfs("/", "CART", "anything").unwrap_err();
         assert!(matches!(
             err,
             FormatError::NotRemovable(_) | FormatError::SystemDrive(_)
@@ -373,9 +376,9 @@ mod tests {
 
     #[test]
     fn mkfs_arguments_are_in_the_right_order() {
-        let (program, args) = mkfs_command("/dev/sdb1", "CINDER");
+        let (program, args) = mkfs_command("/dev/sdb1", "Cinder");
         assert_eq!(program, "pkexec");
-        assert_eq!(args, vec!["mkfs.exfat", "-n", "CINDER", "/dev/sdb1"]);
+        assert_eq!(args, vec!["mkfs.btrfs", "-L", "Cinder", "/dev/sdb1"]);
     }
 
     #[test]
