@@ -188,9 +188,24 @@ async function selectGame(game) {
   }
 }
 
+function safePreviewSrc(src) {
+  const value = String(src || "").trim();
+  if (!value) return "";
+  if (value.startsWith("data:image/")) return value;
+  try {
+    const parsed = new URL(value, window.location.href);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") return parsed.href;
+    if (parsed.protocol === "file:") return parsed.href;
+  } catch {
+    return "";
+  }
+  return "";
+}
+
 function setPreviewArt(src, source = "") {
-  if (src) {
-    el.previewImg.src = src;
+  const safeSrc = safePreviewSrc(src);
+  if (safeSrc) {
+    el.previewImg.src = safeSrc;
     el.previewArt.classList.add("has-art");
   } else {
     el.previewImg.removeAttribute("src");
@@ -478,7 +493,7 @@ function renderSgdbResults(matchName) {
     card.className = "sgdb-card";
 
     const img = document.createElement("img");
-    img.src = art.thumb || art.url;
+    img.src = safePreviewSrc(art.thumb || art.url);
     img.alt = `${matchName} artwork`;
 
     const meta = document.createElement("span");
