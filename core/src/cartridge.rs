@@ -8,9 +8,20 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+/// One game entry inside a multi-game bundle cartridge.
+#[derive(Serialize, Clone)]
+pub struct GameEntry {
+    pub title: String,
+    pub executable: String,
+    /// Cover as a `data:` URI, or empty string if none.
+    pub cover: String,
+    /// Absolute path to the cover image, or empty string.
+    pub cover_path: String,
+}
+
 #[derive(Serialize, Clone)]
 pub struct CartridgeInfo {
-    /// Display title of the game / cartridge.
+    /// Display title of the game / collection.
     pub title: String,
     /// Absolute path to the cover image, or empty string if none. Shown in the
     /// details sheet; never sent back to the backend.
@@ -22,7 +33,8 @@ pub struct CartridgeInfo {
     /// enough to serve anything on the machine.
     pub cover: String,
     /// The value from the `executable` / `open` key — either a URI or a
-    /// relative path on the cartridge.
+    /// relative path on the cartridge. For bundles this is the first game's
+    /// executable so keyboard shortcuts (Enter = play) still work.
     pub executable: String,
     /// The root path of the cartridge drive as supplied by the caller.
     pub drive_path: String,
@@ -33,6 +45,12 @@ pub struct CartridgeInfo {
     /// running game is reading from is a different mistake to pulling one that
     /// only holds a text file.
     pub holds_game: bool,
+    /// True when this is a multi-game bundle with a `[collection]` + `[game]`
+    /// format. Single-game cartridges have `false` here and an empty `games`
+    /// vec for full backwards compatibility.
+    pub is_bundle: bool,
+    /// Individual games, populated only for bundles (`is_bundle == true`).
+    pub games: Vec<GameEntry>,
 }
 
 /// Does this cartridge carry the game, or just point at it?
@@ -85,11 +103,54 @@ pub fn ini_get<'a>(map: &'a IniMap, section: &str, key: &str) -> Option<&'a Stri
     map.get(section)?.get(key)
 }
 
+/// Extract every `[game]` section in order, preserving duplicates.
+///
+/// A regular `IniMap` / `HashMap` collapses repeated sections; this returns
+/// each `[game]` block as its own key→value map so a multi-game bundle is
+/// parsed correctly.
+pub fn parse_game_sections(content: &str) -> Vec<HashMap<String, String>> {
+    let mut result: Vec<HashMap<String, String>> = Vec::new();
+    let mut in_game = false;
+    let mut current: HashMap<String, String> = HashMap::new();
+
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') {
+            if let Some(end) = line.find(']') {
+                let section = line[1..end].trim().to_lowercase();
+                if in_game && !current.is_empty() {
+                    result.push(current.clone());
+                    current.clear();
+                } else if in_game {
+                    current.clear();
+                }
+                in_game = section == "game";
+            }
+            continue;
+        }
+        if in_game {
+            if let Some(eq) = line.find('=') {
+                let key = line[..eq].trim().to_lowercase();
+                let val = line[eq + 1..].trim().to_string();
+                current.insert(key, val);
+            }
+        }
+    }
+    if in_game && !current.is_empty() {
+        result.push(current);
+    }
+    result
+}
+
 // --------------------------------------------------------------------------
 // Helper: read cartridge metadata
 //
 // Priority:
-//   1. cartridge.conf  (our own flat format, section "general" or none)
+//   1. cartridge.conf  (our own flat format — either the legacy single-game
+//      key=value style, or the new [collection] + [game] bundle format)
 //   2. autorun.inf     (classic Windows autorun, section [autorun])
 // --------------------------------------------------------------------------
 
@@ -103,8 +164,58 @@ pub fn read_cartridge_info(drive_path: &str) -> Result<CartridgeInfo, String> {
             .map_err(|e| format!("Failed to read cartridge.conf: {e}"))?;
 
         let ini = parse_ini(&content);
+        let game_sections = parse_game_sections(&content);
 
-        // cartridge.conf may have no section header — values land in "general"
+        // ---- Bundle format: one or more [game] sections ----
+        if !game_sections.is_empty() {
+            let title = ini_get(&ini, "collection", "title")
+                .cloned()
+                .unwrap_or_else(|| "Game Collection".to_string());
+
+            let cover_rel = ini_get(&ini, "collection", "cover")
+                .cloned()
+                .unwrap_or_default();
+            let cover_path = resolve_cover(root, &cover_rel);
+
+            let games: Vec<GameEntry> = game_sections
+                .iter()
+                .map(|g| {
+                    let game_title = g
+                        .get("title")
+                        .cloned()
+                        .unwrap_or_else(|| "Unknown Game".to_string());
+                    let game_exec = g.get("executable").cloned().unwrap_or_default();
+                    let game_cover_rel = g.get("cover").cloned().unwrap_or_default();
+                    let game_cover_path = resolve_cover(root, &game_cover_rel);
+                    GameEntry {
+                        title: game_title,
+                        executable: game_exec,
+                        cover: cover_as_data_uri(&game_cover_path),
+                        cover_path: game_cover_path,
+                    }
+                })
+                .collect();
+
+            // Expose the first game's executable as the primary so keyboard
+            // shortcuts (Enter = play) still work for bundles.
+            let executable = games
+                .first()
+                .map(|g| g.executable.clone())
+                .unwrap_or_default();
+
+            return Ok(CartridgeInfo {
+                title,
+                cover: cover_as_data_uri(&cover_path),
+                cover_path,
+                executable,
+                drive_path: drive_path.to_string(),
+                holds_game: holds_game(root),
+                is_bundle: true,
+                games,
+            });
+        }
+
+        // ---- Single-game format: flat key=value (backwards compatible) ----
         let executable = ini_get(&ini, "general", "executable")
             .cloned()
             .unwrap_or_default();
@@ -125,6 +236,8 @@ pub fn read_cartridge_info(drive_path: &str) -> Result<CartridgeInfo, String> {
             executable,
             drive_path: drive_path.to_string(),
             holds_game: holds_game(root),
+            is_bundle: false,
+            games: Vec::new(),
         });
     }
 
@@ -159,6 +272,8 @@ pub fn read_cartridge_info(drive_path: &str) -> Result<CartridgeInfo, String> {
             executable: String::new(),
             drive_path: drive_path.to_string(),
             holds_game: holds_game(root),
+            is_bundle: false,
+            games: Vec::new(),
         });
     }
 
@@ -332,6 +447,56 @@ mod tests {
         assert_eq!(info.title, "Hollow Knight");
         assert_eq!(info.executable, "steam://rungameid/367520");
         assert!(!info.holds_game);
+        assert!(!info.is_bundle);
+        assert!(info.games.is_empty());
+    }
+
+    #[test]
+    fn reads_a_bundle_cartridge_conf() {
+        let scratch = crate::testutil::Scratch::new("bundle");
+        std::fs::write(
+            scratch.join("cartridge.conf"),
+            "[collection]\ntitle=God of War Collection\ncover=collection.jpg\n\n\
+             [game]\ntitle=God of War 2018\nexecutable=steam://rungameid/310970\n\n\
+             [game]\ntitle=God of War Ragnarök\nexecutable=steam://rungameid/1476670\n",
+        )
+        .unwrap();
+
+        let info = read_cartridge_info(scratch.path().to_str().unwrap()).unwrap();
+        assert!(info.is_bundle);
+        assert_eq!(info.title, "God of War Collection");
+        assert_eq!(info.games.len(), 2);
+        assert_eq!(info.games[0].title, "God of War 2018");
+        assert_eq!(info.games[0].executable, "steam://rungameid/310970");
+        assert_eq!(info.games[1].title, "God of War Ragnarök");
+        assert_eq!(info.games[1].executable, "steam://rungameid/1476670");
+        // Primary executable is the first game's for keyboard shortcuts.
+        assert_eq!(info.executable, "steam://rungameid/310970");
+    }
+
+    #[test]
+    fn parse_game_sections_preserves_order() {
+        let content = "[collection]\ntitle=Test\n\n\
+                       [game]\ntitle=A\nexecutable=steam://1\n\n\
+                       [game]\ntitle=B\nexecutable=steam://2\n";
+        let sections = parse_game_sections(content);
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].get("title").unwrap(), "A");
+        assert_eq!(sections[1].get("title").unwrap(), "B");
+    }
+
+    #[test]
+    fn single_game_conf_is_not_a_bundle() {
+        let scratch = crate::testutil::Scratch::new("single");
+        std::fs::write(
+            scratch.join("cartridge.conf"),
+            "title=Cyberpunk 2077\nexecutable=steam://rungameid/1091500\n",
+        )
+        .unwrap();
+
+        let info = read_cartridge_info(scratch.path().to_str().unwrap()).unwrap();
+        assert!(!info.is_bundle);
+        assert!(info.games.is_empty());
     }
 
     #[test]

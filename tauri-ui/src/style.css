@@ -387,6 +387,130 @@
 }
 
 /* ==========================================================================
+   Bundle game list
+   ========================================================================== */
+
+#game-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  animation: rise 520ms 380ms var(--ease) both;
+}
+
+#game-list[hidden] {
+  display: none;
+}
+
+.game-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: oklch(0.12 0.004 65 / 0.82);
+  border-radius: 5px;
+  padding: 6px 8px 6px 6px;
+  border: 1px solid oklch(1 0 0 / 0.08);
+}
+
+.game-row__cover {
+  width: 40px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 3px;
+  flex-shrink: 0;
+  background: oklch(0.2 0.005 65);
+}
+
+.game-row__cover:not([src]),
+.game-row__cover[src=""] {
+  background: oklch(0.18 0.006 65);
+}
+
+.game-row__title {
+  flex: 1;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-stretch: 105%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-row__play {
+  appearance: none;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  font-stretch: 106%;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 130ms linear, transform 130ms var(--ease);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.22);
+}
+
+.game-row__play:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--accent) 88%, white);
+}
+
+.game-row__play:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.game-row__play:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.game-row__play:disabled {
+  cursor: not-allowed;
+  background: oklch(0.3 0.005 65 / 0.85);
+  color: var(--ink-3);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+#bundle-eject-row {
+  display: flex;
+  margin-top: 9px;
+  animation: rise 540ms 400ms var(--ease) both;
+}
+
+#bundle-eject-row[hidden] {
+  display: none;
+}
+
+#btn-bundle-eject {
+  flex: 1;
+  padding: 0 17px;
+  border: 1px solid var(--hairline);
+  background: oklch(0.14 0.004 65 / 0.45);
+  color: var(--ink);
+}
+
+#btn-bundle-eject:hover:not(:disabled) {
+  border-color: oklch(1 0 0 / 0.32);
+  background: oklch(0.18 0.004 65 / 0.7);
+}
+
+#btn-bundle-eject:disabled {
+  cursor: not-allowed;
+  color: var(--ink-3);
+  border-color: oklch(1 0 0 / 0.08);
+}
+
+/* ==========================================================================
    Toast
    ========================================================================== */
 

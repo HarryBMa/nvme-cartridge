@@ -634,3 +634,131 @@ li:last-child .row {
   display: flex;
   justify-content: flex-end;
 }
+
+/* --- Bundle panel -------------------------------------------------------- */
+
+#drive-space {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 4px 0 0;
+}
+
+#bundle-panel {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: rise 320ms var(--ease) both;
+}
+
+#bundle-panel[hidden] {
+  display: none;
+}
+
+#bundle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bundle-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--sunk);
+  border: 1px solid var(--hairline-soft);
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+
+.bundle-item__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bundle-item__size {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.bundle-item__remove {
+  padding: 2px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid var(--hairline-soft);
+  cursor: pointer;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.bundle-item__remove:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+#bundle-space {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: right;
+}
+
+#bundle-space.is-error {
+  color: color-mix(in oklch, var(--danger) 78%, var(--ink));
+  font-weight: 600;
+}
+
+#collection-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: rise 280ms var(--ease) both;
+}
+
+#collection-meta[hidden] {
+  display: none;
+}
+
+#collection-title {
+  font-size: 13px;
+  width: 100%;
+  padding: 7px 10px;
+  color: var(--ink);
+  background: var(--sunk);
+  border: 1px solid var(--hairline-soft);
+  border-radius: 5px;
+}
+
+#collection-title:focus {
+  outline: none;
+  border-color: color-mix(in oklch, var(--accent) 60%, transparent);
+}
+
+/* Bundle-toggle button on game rows */
+.row__bundle-btn {
+  padding: 3px 9px;
+  font-size: 11px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid var(--hairline-soft);
+  cursor: pointer;
+  color: var(--muted);
+  white-space: nowrap;
+  align-self: center;
+  line-height: 1.4;
+}
+
+.row__bundle-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.row__bundle-btn.is-added {
+  background: color-mix(in oklch, var(--accent) 15%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
+}

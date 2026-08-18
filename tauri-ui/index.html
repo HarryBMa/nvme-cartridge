@@ -58,12 +58,22 @@
 
       <p id="notice" hidden></p>
 
+      <!-- Single-game mode: one Play button -->
       <div id="button-row">
         <button id="btn-play" class="btn btn--play" type="button" disabled>
           <span class="btn__label">Play</span>
           <kbd class="btn__key" aria-hidden="true">&crarr;</kbd>
         </button>
         <button id="btn-eject" class="btn btn--eject" type="button" disabled>
+          <span class="btn__label">Eject</span>
+          <kbd class="btn__key" aria-hidden="true">E</kbd>
+        </button>
+      </div>
+
+      <!-- Bundle mode: per-game list + shared Eject -->
+      <ul id="game-list" hidden aria-label="Games on this cartridge"></ul>
+      <div id="bundle-eject-row" hidden>
+        <button id="btn-bundle-eject" class="btn btn--eject" type="button" disabled>
           <span class="btn__label">Eject</span>
           <kbd class="btn__key" aria-hidden="true">E</kbd>
         </button>
