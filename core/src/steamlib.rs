@@ -356,8 +356,8 @@ fn copy_into(
             *total += bytes;
             progress(*total);
         }
-        // Symlinks are skipped: exFAT cannot represent them, and Steam games on
-        // Windows do not rely on them.
+        // Symlinks are skipped: WinBtrfs on Windows does not reliably support
+        // them, and Steam games on Windows do not rely on them.
     }
 
     Ok(())

@@ -232,12 +232,12 @@ pub fn tree_size_of(path: &Path) -> u64 {
     crate::steamlib::tree_size(path)
 }
 
-/// A folder name safe to create on an exFAT cartridge.
+/// A folder name safe to create on a btrfs cartridge (and readable on Windows).
 pub fn safe_folder_name(title: &str) -> String {
     let cleaned: String = title
         .chars()
         .map(|c| match c {
-            // The set exFAT and Windows both refuse.
+            // Characters Windows refuses.
             '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => ' ',
             c if c.is_control() => ' ',
             c => c,
@@ -372,13 +372,13 @@ mod tests {
     }
 
     #[test]
-    fn folder_names_are_safe_for_exfat() {
+    fn folder_names_are_safe_for_btrfs_and_windows() {
         assert_eq!(safe_folder_name("Hollow Knight"), "Hollow Knight");
         assert_eq!(
             safe_folder_name("Ori: and the Blind Forest"),
             "Ori and the Blind Forest"
         );
-        // Only the characters exFAT actually refuses are stripped; "!" is legal
+        // Only the characters Windows actually refuses are stripped; "!" is legal
         // and stays.
         assert_eq!(safe_folder_name("What?! *really*"), "What ! really");
         assert_eq!(safe_folder_name("A|B*C?D"), "A B C D");
