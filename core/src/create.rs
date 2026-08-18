@@ -60,6 +60,23 @@ pub struct GameInfo {
     pub can_copy: bool,
 }
 
+/// One game's metadata when creating a multi-game bundle cartridge.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BundleGameRequest {
+    pub title: String,
+    pub executable: String,
+    /// Steam app id, when the cover should come from Steam.
+    #[serde(default)]
+    pub app_id: Option<String>,
+    /// Playnite GUID, when the cover should come from Playnite's cache.
+    #[serde(default)]
+    pub playnite_id: Option<String>,
+    /// Absolute path to a user-chosen cover image for this game.
+    #[serde(default)]
+    pub cover_source: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CartridgeRequest {
@@ -95,6 +112,14 @@ pub struct CartridgeRequest {
     /// game's install directory. Only used for non-Steam games.
     #[serde(default)]
     pub copy_executable: Option<String>,
+    /// When set, create a multi-game bundle cartridge. `title` becomes the
+    /// collection title; the top-level `executable` field is ignored (each
+    /// game in the vec carries its own).
+    #[serde(default)]
+    pub games: Option<Vec<BundleGameRequest>>,
+    /// Absolute path to the collection's cover image for a bundle.
+    #[serde(default)]
+    pub collection_cover_source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -355,7 +380,106 @@ pub fn create_cartridge(
         wait_for_mount(&root);
     }
 
-    // ---- 2. Copy the game -----------------------------------------------
+    // ---- 2. Bundle mode: write each game, then bail early ----------------
+    if let Some(bundle_games) = &request.games {
+        if !bundle_games.is_empty() {
+            // Validate every game's executable before writing anything.
+            for g in bundle_games {
+                let exec = sanitize_conf_value(&g.executable);
+                validate_executable(&exec, &root)?;
+            }
+
+            // Collection cover.
+            progress(Progress {
+                step: "cover",
+                message: "Copying collection cover art…".to_string(),
+                done_bytes: 0,
+                total_bytes: 0,
+            });
+            let coll_cover_src = request
+                .collection_cover_source
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .or_else(|| {
+                    request
+                        .cover_source
+                        .as_deref()
+                        .filter(|s| !s.trim().is_empty())
+                });
+            let coll_cover_dest = match write_cover_path(&root, coll_cover_src, "collection") {
+                Ok(p) => p,
+                Err(e) => {
+                    warnings.push(format!("Collection cover art was not copied: {e}"));
+                    None
+                }
+            };
+            result.cover_written = coll_cover_dest.is_some();
+
+            // Per-game covers.
+            let mut game_tuples: Vec<(String, String, Option<String>)> = Vec::new();
+            for (i, g) in bundle_games.iter().enumerate() {
+                let game_title = sanitize_conf_value(&g.title);
+                let game_exec = sanitize_conf_value(&g.executable);
+                let game_cover_src = g
+                    .cover_source
+                    .as_deref()
+                    .filter(|s| !s.trim().is_empty());
+                let stem = format!("cover_{i}");
+                let game_cover_name =
+                    write_cover_path(&root, game_cover_src, &stem)
+                        .unwrap_or(None)
+                        .and_then(|p| {
+                            p.file_name()
+                                .and_then(|n| n.to_str())
+                                .map(str::to_string)
+                        });
+                game_tuples.push((game_title, game_exec, game_cover_name));
+            }
+
+            // cartridge.conf in bundle format.
+            let coll_cover_name = coll_cover_dest
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str());
+            let tuples_ref: Vec<(&str, &str, Option<&str>)> = game_tuples
+                .iter()
+                .map(|(t, e, c)| (t.as_str(), e.as_str(), c.as_deref()))
+                .collect();
+            let conf = render_bundle_conf(&title, coll_cover_name, &tuples_ref);
+            let conf_path = root.join("cartridge.conf");
+            std::fs::write(&conf_path, conf)
+                .map_err(|e| format!("Could not write {}: {e}", conf_path.display()))?;
+            result.conf_path = conf_path.to_string_lossy().into_owned();
+
+            // autorun.inf.
+            progress(Progress {
+                step: "autorun",
+                message: "Naming the drive…".to_string(),
+                done_bytes: 0,
+                total_bytes: 0,
+            });
+            match autorun::write_autorun(&root, &title, coll_cover_dest.as_deref()) {
+                Ok(icon) => {
+                    result.autorun_written = true;
+                    result.icon = icon;
+                }
+                Err(e) => warnings.push(format!("autorun.inf was not written: {e}")),
+            }
+
+            if !result.cover_written {
+                warnings.push(
+                    "No collection cover art on the cartridge. \
+                     The launcher will show a placeholder."
+                        .to_string(),
+                );
+            }
+
+            result.warnings = warnings;
+            return Ok(result);
+        }
+    }
+
+    // ---- 2b. Copy the game (single-game only) ----------------------------
     //
     // Before validating the executable, because a generic copy *creates* the
     // file that Play will point at: the target does not exist on the cartridge
@@ -844,6 +968,45 @@ fn write_cover(root: &Path, request: &CartridgeRequest) -> Result<Option<PathBuf
     Ok(Some(destination))
 }
 
+/// Copy an image from an explicit `source_path` to `<root>/<stem>.<ext>`.
+///
+/// Used for bundle covers (collection + per-game) where the source is already
+/// a concrete path rather than being looked up by app id or Playnite id.
+/// Returns `None` (not an error) when `source_path` is absent.
+fn write_cover_path(
+    root: &Path,
+    source_path: Option<&str>,
+    stem: &str,
+) -> Result<Option<PathBuf>, String> {
+    let src_str = match source_path {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => return Ok(None),
+    };
+    let source = Path::new(src_str);
+    let meta =
+        std::fs::metadata(source).map_err(|e| format!("{}: {e}", source.display()))?;
+    if !meta.is_file() {
+        return Err(format!("{} is not a file", source.display()));
+    }
+    if meta.len() > MAX_COVER_BYTES {
+        return Err(format!(
+            "{} is {:.1} MB; the limit is {} MB",
+            source.display(),
+            meta.len() as f64 / 1_048_576.0,
+            MAX_COVER_BYTES / 1_048_576
+        ));
+    }
+    let extension = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_else(|| "jpg".to_string());
+    let destination = root.join(format!("{stem}.{extension}"));
+    std::fs::copy(source, &destination)
+        .map_err(|e| format!("could not write {}: {e}", destination.display()))?;
+    Ok(Some(destination))
+}
+
 /// Strip anything that would corrupt the `key=value` file.
 ///
 /// Newlines are the one that matters: a title containing one could otherwise
@@ -917,6 +1080,35 @@ pub fn render_cartridge_conf(title: &str, executable: &str, cover: Option<&str>)
     out.push_str(&format!("executable={executable}\n"));
     if let Some(cover) = cover {
         out.push_str(&format!("cover={cover}\n"));
+    }
+    out
+}
+
+/// Render the bundle (multi-game) conf, with a `[collection]` header and one
+/// `[game]` block per game.
+pub fn render_bundle_conf(
+    collection_title: &str,
+    collection_cover: Option<&str>,
+    games: &[(&str, &str, Option<&str>)],
+) -> String {
+    let mut out = String::new();
+    out.push_str("# PC Cartridge System\n");
+    out.push_str("# Written by the create-cartridge wizard. Safe to edit by hand.\n");
+    out.push('\n');
+    out.push_str("[collection]\n");
+    out.push_str(&format!("title={collection_title}\n"));
+    if let Some(cover) = collection_cover {
+        out.push_str(&format!("cover={cover}\n"));
+    }
+    out.push('\n');
+    for (title, executable, cover) in games {
+        out.push_str("[game]\n");
+        out.push_str(&format!("title={title}\n"));
+        out.push_str(&format!("executable={executable}\n"));
+        if let Some(c) = cover {
+            out.push_str(&format!("cover={c}\n"));
+        }
+        out.push('\n');
     }
     out
 }

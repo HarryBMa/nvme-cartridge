@@ -37,6 +37,7 @@ const el = {
   previewSub: document.getElementById("preview-sub"),
   drives: document.getElementById("drives"),
   drivesEmpty: document.getElementById("drives-empty"),
+  driveSpace: document.getElementById("drive-space"),
   optCopy: document.getElementById("opt-copy"),
   optCopyHint: document.getElementById("opt-copy-hint"),
   exePick: document.getElementById("exe-pick"),
@@ -56,6 +57,12 @@ const el = {
   progressFill: document.getElementById("progress-fill"),
   progressText: document.getElementById("progress-text"),
   status: document.getElementById("status"),
+  // Bundle UI
+  bundlePanel: document.getElementById("bundle-panel"),
+  bundleList: document.getElementById("bundle-list"),
+  bundleSpace: document.getElementById("bundle-space"),
+  collectionMeta: document.getElementById("collection-meta"),
+  collectionTitle: document.getElementById("collection-title"),
 };
 
 let games = [];
@@ -68,6 +75,8 @@ let formatPlan = null;
 let building = false;
 /** Candidates for what Play should start, when copying a non-Steam game. */
 let exeCandidates = [];
+/** Games added to the bundle (Map of game.id → game object). Order preserved. */
+let bundleGames = new Map();
 
 /* ========================================================================== */
 
@@ -108,10 +117,12 @@ function renderGames() {
     row.type = "button";
     row.className = "row";
     row.setAttribute("role", "option");
+    const inBundle = bundleGames.has(game.id);
     row.setAttribute(
       "aria-selected",
-      String(!manualMode && selectedGame?.id === game.id),
+      String(!manualMode && (selectedGame?.id === game.id || inBundle)),
     );
+    if (inBundle) row.classList.add("in-bundle");
 
     const name = document.createElement("span");
     name.className = "row__name";
@@ -123,9 +134,21 @@ function renderGames() {
     const bits = [game.source || "", game.sizeOnDisk ? formatBytes(game.sizeOnDisk) : ""];
     meta.textContent = bits.filter(Boolean).join(" · ");
 
+    // Bundle toggle: "+" to add, "✓ Added" to remove.
+    const bundleBtn = document.createElement("button");
+    bundleBtn.type = "button";
+    bundleBtn.className = `row__bundle-btn${inBundle ? " is-added" : ""}`;
+    bundleBtn.title = inBundle ? "Remove from bundle" : "Add to bundle";
+    bundleBtn.setAttribute("aria-label", inBundle ? `Remove ${game.name} from bundle` : `Add ${game.name} to bundle`);
+    bundleBtn.textContent = inBundle ? "✓" : "+";
+    bundleBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleBundleGame(game);
+    });
+
     row.append(name, meta);
     row.addEventListener("click", () => selectGame(game));
-    li.append(row);
+    li.append(row, bundleBtn);
     el.games.append(li);
   }
 
@@ -181,6 +204,98 @@ function enterManualMode() {
   el.customTitle.focus();
 }
 
+/* ----------------------------------------------------------------- bundle */
+
+function toggleBundleGame(game) {
+  if (bundleGames.has(game.id)) {
+    bundleGames.delete(game.id);
+  } else {
+    bundleGames.set(game.id, game);
+  }
+  renderGames();
+  renderBundlePanel();
+  refreshCreateButton();
+}
+
+function renderBundlePanel() {
+  const list = [...bundleGames.values()];
+  el.bundlePanel.hidden = list.length === 0;
+  el.collectionMeta.hidden = list.length < 2;
+
+  el.bundleList.replaceChildren();
+  for (const game of list) {
+    const li = document.createElement("li");
+    li.className = "bundle-item";
+
+    const name = document.createElement("span");
+    name.className = "bundle-item__name";
+    name.textContent = game.name;
+
+    const size = document.createElement("span");
+    size.className = "bundle-item__size";
+    size.textContent = game.sizeOnDisk ? formatBytes(game.sizeOnDisk) : "";
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "bundle-item__remove";
+    removeBtn.setAttribute("aria-label", `Remove ${game.name}`);
+    removeBtn.textContent = "✕";
+    removeBtn.addEventListener("click", () => toggleBundleGame(game));
+
+    li.append(name, size, removeBtn);
+    el.bundleList.append(li);
+  }
+
+  // Space summary.
+  const drive = drives.find((d) => d.path === selectedDrive);
+  if (list.length > 0) {
+    const totalSize = list.reduce((sum, g) => sum + (g.sizeOnDisk || 0), 0);
+    const freeBytes = drive?.freeBytes ?? null;
+    let msg = `Total: ${formatBytes(totalSize)}`;
+    if (freeBytes !== null) {
+      msg += ` · ${formatBytes(freeBytes)} available`;
+      if (totalSize > freeBytes) {
+        msg += " — ⚠ Not enough space";
+        el.bundleSpace.classList.add("is-error");
+      } else {
+        el.bundleSpace.classList.remove("is-error");
+      }
+    }
+    el.bundleSpace.textContent = msg;
+    el.bundleSpace.hidden = false;
+  } else {
+    el.bundleSpace.hidden = true;
+    el.bundleSpace.classList.remove("is-error");
+  }
+
+  // Auto-suggest collection title from game names.
+  if (list.length >= 2 && !el.collectionTitle.value) {
+    const commonWord = findCommonWord(list.map((g) => g.name));
+    if (commonWord) {
+      el.collectionTitle.placeholder = `${commonWord} Collection`;
+    }
+  }
+}
+
+/** Find a common word across game names for auto-suggesting a collection title. */
+function findCommonWord(names) {
+  if (names.length === 0) return "";
+  const wordSets = names.map((n) =>
+    new Set(n.toLowerCase().split(/\s+/).filter((w) => w.length > 3)),
+  );
+  for (const word of wordSets[0]) {
+    if (wordSets.every((s) => s.has(word))) {
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    }
+  }
+  return "";
+}
+
+/** Whether we are in bundle mode (2+ games selected). */
+function isBundleMode() {
+  return bundleGames.size >= 2;
+}
+
 /* ----------------------------------------------------------------- drives */
 
 function renderDrives() {
@@ -225,6 +340,17 @@ async function selectDrive(drive) {
   selectedDrive = drive.path;
   renderDrives();
 
+  // Show the available space for the chosen cartridge.
+  if (drive.freeBytes > 0) {
+    el.driveSpace.textContent = `${formatBytes(drive.freeBytes)} available on ${drive.label}`;
+    el.driveSpace.hidden = false;
+  } else {
+    el.driveSpace.hidden = true;
+  }
+
+  // Update the bundle space display now we know the drive.
+  if (bundleGames.size > 0) renderBundlePanel();
+
   // Ask the backend what erasing this drive would mean; the confirmation the
   // user types is checked against its answer, not against anything held here.
   formatPlan = null;
@@ -254,6 +380,13 @@ async function selectDrive(drive) {
 /* ---------------------------------------------------------------- options */
 
 function refreshOptions() {
+  // In bundle mode, the copy/exe options are hidden — each game's steam:// URI
+  // handles launching without copying files.
+  const bundle = isBundleMode();
+  document.getElementById("options").hidden = bundle;
+
+  if (bundle) return;
+
   const copyable = !manualMode && Boolean(selectedGame?.canCopy);
   el.optCopy.disabled = !copyable;
   if (!copyable) el.optCopy.checked = false;
@@ -357,6 +490,17 @@ function defaultLabel(title) {
 /* ----------------------------------------------------------------- create */
 
 function intent() {
+  // Bundle mode: the "intent" is the collection.
+  if (isBundleMode()) {
+    const title = el.collectionTitle.value.trim() || el.collectionTitle.placeholder || "Game Collection";
+    return {
+      title,
+      executable: "",
+      appId: null,
+      playniteId: null,
+      isBundle: true,
+    };
+  }
   if (manualMode) {
     return {
       title: el.customTitle.value.trim(),
@@ -381,6 +525,27 @@ function refreshCreateButton() {
     el.create.disabled = true;
     return;
   }
+
+  // Bundle: need 2+ games and a drive. Check for space overflow.
+  if (isBundleMode()) {
+    const hasTitle = Boolean(
+      el.collectionTitle.value.trim() || el.collectionTitle.placeholder,
+    );
+    const drive = drives.find((d) => d.path === selectedDrive);
+    const totalSize = [...bundleGames.values()].reduce(
+      (sum, g) => sum + (g.sizeOnDisk || 0),
+      0,
+    );
+    const noSpace = drive && totalSize > 0 && totalSize > drive.freeBytes;
+    let ok = hasTitle && Boolean(selectedDrive) && !noSpace;
+    if (ok && el.optFormat.checked) {
+      const typed = el.formatConfirm.value.trim();
+      ok = Boolean(formatPlan) && typed === formatPlan.currentLabel && Boolean(el.formatLabel.value.trim());
+    }
+    el.create.disabled = !ok;
+    return;
+  }
+
   const want = intent();
   let ok = Boolean(want && want.title && want.executable && selectedDrive);
 
@@ -434,8 +599,27 @@ async function writeCartridge() {
   status("");
 
   try {
-    const result = await invoke("create_cartridge", {
-      request: {
+    let request;
+    if (isBundleMode()) {
+      // Build a bundle request.
+      const bundleList = [...bundleGames.values()];
+      request = {
+        drivePath: selectedDrive,
+        title: want.title,
+        executable: "",
+        formatDrive: el.optFormat.checked,
+        formatLabel: el.formatLabel.value.trim() || null,
+        formatConfirmation: el.formatConfirm.value.trim() || null,
+        games: bundleList.map((g) => ({
+          title: g.name,
+          executable: g.executable,
+          appId: g.library === "steam" ? g.id : null,
+          playniteId: g.library === "playnite" ? g.id : null,
+          coverSource: null,
+        })),
+      };
+    } else {
+      request = {
         drivePath: selectedDrive,
         title: want.title,
         executable: want.executable,
@@ -447,8 +631,10 @@ async function writeCartridge() {
         formatConfirmation: el.formatConfirm.value.trim() || null,
         copyGame: el.optCopy.checked,
         copyExecutable: el.exePick.hidden ? null : el.exeChoices.value || null,
-      },
-    });
+      };
+    }
+
+    const result = await invoke("create_cartridge", { request });
 
     const drive = drives.find((d) => d.path === selectedDrive);
     const parts = [`Cartridge written to ${drive ? drive.label : selectedDrive}.`];
@@ -539,6 +725,7 @@ el.customTitle.addEventListener("input", () => {
   if (el.optFormat.checked && !el.formatLabel.value) refreshFormatFields();
 });
 el.customExec.addEventListener("input", refreshCreateButton);
+el.collectionTitle.addEventListener("input", refreshCreateButton);
 el.optCopy.addEventListener("change", () => {
   refreshExePicker();
   refreshCreateButton();
@@ -660,7 +847,7 @@ async function demoInvoke(command, args) {
     case "create_cartridge":
       return {
         confPath: `${args.request.drivePath}/cartridge.conf`,
-        coverWritten: Boolean(args.request.appId),
+        coverWritten: Boolean(args.request.appId) || Boolean(args.request.games?.length),
         autorunWritten: true,
         icon: null,
         formatted: args.request.formatDrive,

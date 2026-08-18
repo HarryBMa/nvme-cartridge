@@ -34,6 +34,9 @@ const el = {
   sheetClose: document.getElementById("btn-sheet-close"),
   specs: document.getElementById("specs"),
   toast: document.getElementById("toast"),
+  gameList: document.getElementById("game-list"),
+  bundleEjectRow: document.getElementById("bundle-eject-row"),
+  bundleEject: document.getElementById("btn-bundle-eject"),
 };
 
 let cartridge = null;
@@ -208,6 +211,12 @@ function toast(message, isError = false) {
 function setBusy(busy) {
   el.play.disabled = busy || !cartridge?.executable;
   el.eject.disabled = busy || !cartridge;
+  if (el.bundleEject) el.bundleEject.disabled = busy || !cartridge;
+  if (el.gameList && !el.gameList.hidden) {
+    for (const btn of el.gameList.querySelectorAll(".game-row__play")) {
+      btn.disabled = busy;
+    }
+  }
 }
 
 async function closeWindow() {
@@ -282,8 +291,86 @@ async function init() {
   // the placeholder simply stays.
   if (cartridge.cover) await showCover(cartridge.cover);
 
+  // Bundle mode: replace the single Play button with a per-game list.
+  if (cartridge.isBundle && cartridge.games?.length > 0) {
+    document.getElementById("button-row").hidden = true;
+    el.gameList.hidden = false;
+    el.bundleEjectRow.hidden = false;
+    el.bundleEject.disabled = false;
+    el.eyebrow.textContent = "Collection";
+    renderGameList(cartridge.games);
+  }
+
   setBusy(false);
   await showWindow();
+}
+
+/* ==========================================================================
+   Bundle game list
+   ========================================================================== */
+
+/**
+ * Render the per-game list for a multi-game bundle cartridge.
+ * Each row has a small cover thumbnail, the game title, and a Play button.
+ * Arrow keys move focus; Enter activates the focused play button.
+ */
+function renderGameList(games) {
+  el.gameList.replaceChildren();
+  let focusedIndex = 0;
+
+  games.forEach((game, index) => {
+    const li = document.createElement("li");
+    li.className = "game-row";
+
+    const img = document.createElement("img");
+    img.className = "game-row__cover";
+    img.alt = "";
+    if (game.cover) img.src = game.cover;
+
+    const titleEl = document.createElement("span");
+    titleEl.className = "game-row__title";
+    titleEl.textContent = game.title || "Unknown game";
+
+    const btn = document.createElement("button");
+    btn.className = "game-row__play";
+    btn.type = "button";
+    btn.textContent = "Play";
+    btn.setAttribute("aria-label", `Play ${game.title || "Unknown game"}`);
+    btn.dataset.gameIndex = String(index);
+    btn.addEventListener("click", async () => {
+      if (!game.executable || btn.disabled) return;
+      setBusy(true);
+      toast("Launching…");
+      try {
+        await invoke("launch_game", {
+          executable: game.executable,
+          drivePath: cartridge.drive_path,
+        });
+        toast("Launched");
+        setTimeout(closeWindow, 900);
+      } catch (error) {
+        toast(String(error), true);
+        setBusy(false);
+      }
+    });
+
+    li.append(img, titleEl, btn);
+    el.gameList.append(li);
+  });
+
+  // Arrow-key navigation between game rows.
+  el.gameList.addEventListener("keydown", (event) => {
+    const btns = Array.from(el.gameList.querySelectorAll(".game-row__play"));
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+      event.preventDefault();
+      focusedIndex = Math.min(focusedIndex + 1, btns.length - 1);
+      btns[focusedIndex]?.focus();
+    } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      focusedIndex = Math.max(focusedIndex - 1, 0);
+      btns[focusedIndex]?.focus();
+    }
+  });
 }
 
 function showCover(src) {
@@ -331,18 +418,14 @@ el.play.addEventListener("click", async () => {
 /** Set once the user has been warned that a game lives on this cartridge. */
 let ejectConfirmed = false;
 
-el.eject.addEventListener("click", async () => {
-  if (!cartridge || el.eject.disabled) return;
-
-  // A cartridge that only holds a conf file can go at any time. One carrying the
-  // game itself may be feeding a running process, so it asks once.
+async function doEject(btnLabel) {
+  if (!cartridge) return;
   if (cartridge.holds_game && !ejectConfirmed) {
     ejectConfirmed = true;
-    el.eject.querySelector(".btn__label").textContent = "Eject anyway";
+    if (btnLabel) btnLabel.textContent = "Eject anyway";
     toast("The game is installed on this cartridge. Quit it first, then press Eject again.", true);
     return;
   }
-
   setBusy(true);
   toast("Ejecting…");
   try {
@@ -353,6 +436,16 @@ el.eject.addEventListener("click", async () => {
     toast(String(error), true);
     setBusy(false);
   }
+}
+
+el.eject.addEventListener("click", async () => {
+  if (!cartridge || el.eject.disabled) return;
+  await doEject(el.eject.querySelector(".btn__label"));
+});
+
+el.bundleEject.addEventListener("click", async () => {
+  if (!cartridge || el.bundleEject.disabled) return;
+  await doEject(el.bundleEject.querySelector(".btn__label"));
 });
 
 el.close.addEventListener("click", closeWindow);
@@ -367,12 +460,18 @@ document.addEventListener("keydown", (event) => {
     case "Enter":
       if (sheetOpen) return;
       event.preventDefault();
-      el.play.click();
+      // For bundles, Enter plays the first game.
+      if (cartridge?.isBundle && cartridge.games?.length > 0) {
+        el.gameList.querySelector(".game-row__play")?.click();
+      } else {
+        el.play.click();
+      }
       break;
     case "e":
     case "E":
       event.preventDefault();
-      el.eject.click();
+      if (cartridge?.isBundle) el.bundleEject.click();
+      else el.eject.click();
       break;
     case "i":
     case "I":
@@ -401,6 +500,31 @@ async function demoInvoke(command, args) {
   const state = new URLSearchParams(location.search).get("state");
   switch (command) {
     case "parse_cartridge":
+      if (state === "bundle") {
+        return {
+          title: "God of War Collection",
+          cover: "src/demo/cover.jpg",
+          cover_path: "D:\\collection.jpg",
+          executable: "steam://rungameid/310970",
+          drive_path: args.drivePath,
+          isBundle: true,
+          holdGame: false,
+          games: [
+            {
+              title: "God of War (2018)",
+              executable: "steam://rungameid/310970",
+              cover: "src/demo/cover.jpg",
+              coverPath: "",
+            },
+            {
+              title: "God of War: Ragnarök",
+              executable: "steam://rungameid/1476670",
+              cover: "",
+              coverPath: "",
+            },
+          ],
+        };
+      }
       return {
         title: "Cinder & Salt",
         // A plain path stands in for the data URI the backend would send; the
@@ -409,6 +533,8 @@ async function demoInvoke(command, args) {
         cover_path: "D:\\cover.jpg",
         executable: state === "noexec" ? "" : "steam://rungameid/367520",
         drive_path: args.drivePath,
+        isBundle: false,
+        games: [],
       };
     default:
       console.log("[preview]", command, args);

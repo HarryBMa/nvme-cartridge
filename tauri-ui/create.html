@@ -50,6 +50,21 @@
             <span class="btn__label">Load library</span>
           </button>
         </div>
+
+        <!-- Bundle panel: shows selected games, collection metadata, and space -->
+        <div id="bundle-panel" hidden>
+          <p class="eyebrow" style="margin: 12px 0 6px">Bundle</p>
+          <ul id="bundle-list" aria-label="Games in bundle"></ul>
+          <p id="bundle-space" class="field__hint"></p>
+
+          <div id="collection-meta" hidden>
+            <label class="field">
+              <span class="field__label">Collection name</span>
+              <input id="collection-title" type="text" placeholder="God of War Collection"
+                     autocomplete="off" />
+            </label>
+          </div>
+        </div>
       </section>
 
       <!-- Step 2 + 3 --------------------------------------------------- -->
@@ -85,6 +100,8 @@
         </div>
 
         <h2 class="step" id="step-drive"><span class="step__n">2</span> Choose the cartridge</h2>
+
+        <p id="drive-space" class="field__hint" hidden></p>
 
         <div id="drives-wrap">
           <ul id="drives" aria-label="Target drives"></ul>
