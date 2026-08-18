@@ -1,0 +1,43 @@
+# cartridge.conf
+#
+# Put this file at the root of the cartridge. It is the only file a cartridge
+# needs — there are no launch scripts to write and nothing to allowlist.
+#
+# When the drive is plugged in, the launcher reads this, shows the cover art and
+# the title, and waits. Nothing runs until you press Play.
+#
+# ----- Keys -----
+#
+# executable  (required)
+#   What Play should start. Either:
+#     - a URI the OS already knows how to handle:
+#       steam:// heroic:// gog:// epic:// playnite:// lutris:// http:// https://
+#     - a path to a file on the cartridge, relative to this one
+#       (Game\bin\MyGame.exe on Windows, Game/bin/start.sh on Linux)
+#
+# title  (optional)
+#   The name shown in the launcher. Defaults to "Unknown Game".
+#
+# cover  (optional)
+#   Cover art, relative to this file. PNG, JPG, WEBP, AVIF or GIF.
+#   Portrait art at 3:4 fills the window exactly; anything else is centre-cropped.
+#   Must stay on the cartridge — ..\ paths are refused — and is capped at 8 MB.
+#   If omitted, the launcher looks for cover.png, cover.jpg, poster.png or box.png
+#   at the root.
+#
+# ----- Example -----
+
+executable=steam://rungameid/1091500
+title=Cyberpunk 2077
+cover=cover.jpg
+
+# ----- More examples -----
+#
+# Heroic (GOG / Epic)
+#   executable=heroic://launch/gog/1207658921
+#
+# A game that ships on the cartridge itself (Windows)
+#   executable=Game\bin\MyGame.exe
+#
+# A native Linux game on the cartridge
+#   executable=Game/bin/start.sh

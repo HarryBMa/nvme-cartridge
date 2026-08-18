@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>PC Cartridge System (small)</title>
+  <!--
+    The mark for 48px and below. At that size the wordmark in icon.svg collapses
+    into an illegible grey bar, so it is dropped and the diagonals are widened to
+    carry the whole label instead. Same shell, so the two read as one icon.
+  -->
+  <defs>
+    <clipPath id="label-clip">
+      <rect x="134" y="130" width="244" height="212" rx="11" />
+    </clipPath>
+  </defs>
+
+  <rect x="96" y="94" width="320" height="288" rx="20" fill="#0d0d10" />
+  <rect x="148" y="358" width="216" height="58" rx="12" fill="#17171b" />
+  <rect x="106" y="100" width="300" height="276" rx="17" fill="#1b1b1f" />
+  <rect x="134" y="130" width="244" height="212" rx="11" fill="#08080a" />
+
+  <g clip-path="url(#label-clip)">
+    <path d="M128 342 L172 342 L303 130 L259 130 Z" fill="#E8252B" />
+    <path d="M182 342 L226 342 L357 130 L313 130 Z" fill="#F5811F" />
+    <path d="M236 342 L280 342 L411 130 L367 130 Z" fill="#FBD407" />
+  </g>
+</svg>

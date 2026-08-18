@@ -34,6 +34,7 @@ rm -f /usr/local/bin/cartridge-launcher-helper
 rm -f /usr/local/bin/pc-cartridge-system-helper
 rm -f /usr/local/bin/pc-cartridge-system-remove
 rm -f /usr/local/bin/pc-cartridge-eject
+rm -f /usr/local/bin/pc-cartridge-launcher
 
 
 ########################################
