@@ -28,6 +28,9 @@ const el = {
   customTitle: document.getElementById("custom-title"),
   customExec: document.getElementById("custom-exec"),
   btnCustom: document.getElementById("btn-custom"),
+  playniteLocate: document.getElementById("playnite-locate"),
+  playniteRoot: document.getElementById("playnite-root"),
+  btnPlayniteLocate: document.getElementById("btn-playnite-locate"),
   previewArt: document.getElementById("preview-art"),
   previewImg: document.getElementById("preview-img"),
   previewTitle: document.getElementById("preview-title"),
@@ -480,15 +483,25 @@ async function writeCartridge() {
 
 /* ------------------------------------------------------------------- load */
 
-async function loadGames() {
+async function loadGames(playniteRoot = null) {
   try {
-    games = await invoke("list_games");
+    games = await invoke("list_games", playniteRoot ? { playniteRoot } : {});
     renderGames();
+    // If we loaded successfully with a custom path, keep the panel visible so
+    // the user can change it, but dim the hint since it worked.
+    if (playniteRoot) {
+      el.playniteLocate.hidden = false;
+    } else {
+      el.playniteLocate.hidden = true;
+    }
   } catch (error) {
     games = [];
     renderGames();
     el.gamesEmpty.hidden = false;
     el.gamesEmpty.textContent = `${error} You can still enter a game by hand.`;
+    // Show the manual Playnite path field whenever auto-discovery fails so the
+    // user can point the wizard at a non-standard installation.
+    el.playniteLocate.hidden = false;
   }
 }
 
@@ -512,6 +525,15 @@ async function loadDrives({ keepSelection = false, quiet = false } = {}) {
 
 el.search.addEventListener("input", renderGames);
 el.btnCustom.addEventListener("click", enterManualMode);
+el.btnPlayniteLocate.addEventListener("click", async () => {
+  const path = el.playniteRoot.value.trim();
+  if (!path) return;
+  el.btnPlayniteLocate.disabled = true;
+  status("Loading Playnite library…");
+  await loadGames(path);
+  status(games.length ? `Loaded ${games.length} game${games.length === 1 ? "" : "s"}.` : "");
+  el.btnPlayniteLocate.disabled = false;
+});
 el.customTitle.addEventListener("input", () => {
   refreshCreateButton();
   if (el.optFormat.checked && !el.formatLabel.value) refreshFormatFields();

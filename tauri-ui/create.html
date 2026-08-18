@@ -34,6 +34,22 @@
         <button id="btn-custom" class="link" type="button">
           Not in the list? Enter it by hand
         </button>
+
+        <div id="playnite-locate" hidden>
+          <p class="field__hint">
+            Playnite not found automatically.
+            Enter its data folder to import your library.
+          </p>
+          <label class="field">
+            <span class="field__label">Playnite data folder</span>
+            <input id="playnite-root" type="text"
+                   placeholder="%APPDATA%\Playnite"
+                   autocomplete="off" spellcheck="false" />
+          </label>
+          <button id="btn-playnite-locate" class="btn btn--ghost" type="button">
+            <span class="btn__label">Load library</span>
+          </button>
+        </div>
       </section>
 
       <!-- Step 2 + 3 --------------------------------------------------- -->

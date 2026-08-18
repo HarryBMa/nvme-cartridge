@@ -123,11 +123,16 @@ pub struct CartridgeResult {
 }
 
 /// Every game the wizard can offer, Playnite first.
-pub fn list_games() -> Result<Vec<GameInfo>, String> {
+///
+/// `playnite_root_override` lets the wizard pass a user-supplied path when
+/// auto-discovery did not find Playnite. Corresponds to the `PLAYNITE_ROOT`
+/// environment variable, but can be set per-invocation without touching the
+/// environment.
+pub fn list_games(playnite_root_override: Option<&str>) -> Result<Vec<GameInfo>, String> {
     let mut out = Vec::new();
     let mut problems = Vec::new();
 
-    match playnite_games() {
+    match playnite_games(playnite_root_override) {
         Ok(mut games) => out.append(&mut games),
         Err(e) => problems.push(e),
     }
@@ -156,12 +161,15 @@ pub fn list_games() -> Result<Vec<GameInfo>, String> {
         });
     }
 
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|a| a.name.to_lowercase());
     Ok(out)
 }
 
-fn playnite_games() -> Result<Vec<GameInfo>, String> {
-    let root = playnite::playnite_root().ok_or_else(|| "Playnite not found.".to_string())?;
+fn playnite_games(playnite_root_override: Option<&str>) -> Result<Vec<GameInfo>, String> {
+    let root = playnite_root_override
+        .map(PathBuf::from)
+        .or_else(playnite::playnite_root)
+        .ok_or_else(|| "Playnite not found.".to_string())?;
     let exports = playnite::find_exports(&root);
     if exports.is_empty() {
         return Err(format!(
@@ -197,11 +205,21 @@ fn playnite_games() -> Result<Vec<GameInfo>, String> {
             // Anything Playnite knows the install directory for can be copied
             // wholesale; Play then points at a file on the cartridge.
             can_copy: g.install_dir.is_some(),
+            // Walk the install directory to report a real size. This is done
+            // eagerly because the list is already being built; individual games
+            // are typically 1-100 GB so the cost is paid once per wizard open.
+            // If the directory has gone missing (e.g., game was uninstalled but
+            // the export is stale) the size stays 0 rather than failing the
+            // whole list.
+            size_on_disk: g
+                .install_dir
+                .as_deref()
+                .map(portable::tree_size_of)
+                .unwrap_or(0),
             id: g.id,
             name: g.name,
             library: Library::Playnite,
             source: g.source,
-            size_on_disk: 0,
         })
         .collect())
 }
