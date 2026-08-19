@@ -528,10 +528,17 @@ mod tests {
         )
         .unwrap();
 
-        let libs = library_paths(scratch.path());
-        assert!(libs.contains(&PathBuf::from("/mnt/old/Library/steamapps")));
-        // The non-numeric bookkeeping key must not become a library path.
-        assert!(!libs.iter().any(|p| p.to_string_lossy().contains("123")));
+        // Asserted exactly rather than by substring: the scratch directory's
+        // own name carries a pid and a timestamp, so "does any path contain
+        // 123" was a coin flip on the bookkeeping value below.
+        assert_eq!(
+            library_paths(scratch.path()),
+            vec![
+                scratch.join("steamapps"),
+                PathBuf::from("/mnt/old/Library/steamapps"),
+            ],
+            "the non-numeric bookkeeping key must not become a library path"
+        );
     }
 
     #[test]

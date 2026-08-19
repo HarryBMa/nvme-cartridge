@@ -309,8 +309,9 @@ fn probe(mount: &str) -> Option<Link> {
 #[cfg(windows)]
 fn windows_transport(bus: &str) -> String {
     match bus.trim() {
-        "USB" => String::new(),
-        other if other.is_empty() => String::new(),
+        // Plain "USB" says nothing about which USB protocol is in use, so it
+        // is no more informative than saying nothing.
+        "USB" | "" => String::new(),
         other => other.to_string(),
     }
 }
