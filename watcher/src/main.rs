@@ -43,6 +43,7 @@ mod windows_watcher {
     use std::os::windows::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
     use std::process::Command;
+    use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -86,15 +87,17 @@ mod windows_watcher {
     }
 
     /// Last time each drive letter was acted on, for debouncing.
-    static mut SEEN: Option<HashMap<char, Instant>> = None;
+    ///
+    /// Behind a Mutex rather than a `static mut`: the message loop is
+    /// single-threaded, so there is no contention to speak of, but a mutable
+    /// reference to a static is undefined behaviour the moment that assumption
+    /// stops holding, and the compiler is right to refuse it.
+    static SEEN: Mutex<Option<HashMap<char, Instant>>> = Mutex::new(None);
 
     pub fn run() {
         crate::log::line("watcher starting");
 
-        // SAFETY: set up before the window exists, so before any message can be
-        // dispatched. The message loop is single-threaded, so SEEN is only ever
-        // touched from this thread.
-        unsafe { SEEN = Some(HashMap::new()) };
+        *SEEN.lock().expect("no other thread to poison it") = Some(HashMap::new());
 
         let class_name = wide("PcCartridgeWatcher");
 
@@ -198,16 +201,17 @@ mod windows_watcher {
             .collect()
     }
 
-    /// SAFETY: called only from the window procedure, on the single thread that
-    /// initialised SEEN.
-    unsafe fn on_volume_arrived(letter: char) {
+    fn on_volume_arrived(letter: char) {
         let now = Instant::now();
-        let seen = SEEN.as_mut().expect("initialised in run()");
 
-        if let Some(last) = seen.get(&letter) {
-            if now.duration_since(*last) < DEBOUNCE {
-                crate::log::line(&format!("{letter}: ignoring repeat arrival"));
-                return;
+        {
+            let mut guard = SEEN.lock().expect("no other thread to poison it");
+            let seen = guard.get_or_insert_with(HashMap::new);
+            if let Some(last) = seen.get(&letter) {
+                if now.duration_since(*last) < DEBOUNCE {
+                    crate::log::line(&format!("{letter}: ignoring repeat arrival"));
+                    return;
+                }
             }
         }
 
@@ -222,7 +226,12 @@ mod windows_watcher {
             return;
         }
 
-        seen.insert(letter, now);
+        // Recorded only once it is known to be a cartridge, so a plain USB
+        // stick plugged in twice is not debounced into silence.
+        if let Some(seen) = SEEN.lock().expect("no other thread to poison it").as_mut() {
+            seen.insert(letter, now);
+        }
+
         match start_launcher(&root) {
             Ok(()) => crate::log::line(&format!("{letter}: opened the launcher")),
             Err(e) => crate::log::line(&format!("{letter}: could not start the launcher: {e}")),

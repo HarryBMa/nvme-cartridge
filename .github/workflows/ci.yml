@@ -11,10 +11,20 @@ env:
 
 jobs:
   # The logic that can be checked anywhere. gamepak-core has no UI dependency
-  # on purpose, so this needs no webkit, no display and no Windows.
+  # on purpose, so this needs no webkit and no display.
+  #
+  # Run on both operating systems, not just Linux. core has Windows-only code —
+  # volume enumeration, TRIM, the per-cartridge tuning — and when only Linux
+  # checked it, a Windows-only compile error surfaced three jobs later as a
+  # launcher failure, which is a confusing place to find out that a crate with
+  # no UI does not build.
   core:
-    name: core logic
-    runs-on: ubuntu-latest
+    name: core logic (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -23,7 +33,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: core
-      - run: cargo fmt --manifest-path core/Cargo.toml --check
+      # Formatting is the same everywhere; checking it once is enough.
+      - if: matrix.os == 'ubuntu-latest'
+        run: cargo fmt --manifest-path core/Cargo.toml --check
       - run: cargo clippy --manifest-path core/Cargo.toml --all-targets
       - run: cargo test --manifest-path core/Cargo.toml
 

@@ -917,6 +917,7 @@ dependencies = [
  "serde_json",
  "ureq",
  "urlencoding",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

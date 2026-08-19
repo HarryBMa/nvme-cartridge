@@ -13,3 +13,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ureq = { version = "2.10", features = ["json"] }
 urlencoding = "2.1"
+
+# drives.rs enumerates volumes through the Win32 API. Without this the crate
+# does not compile for Windows at all, which is how it stayed broken: CI checks
+# core on Linux only, and every Windows job failed later, in the launcher.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+] }

@@ -22,6 +22,9 @@ windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_System_IO",
     "Win32_System_Ioctl",
+    # CreateFileW takes a *const SECURITY_ATTRIBUTES, so it is gated behind
+    # this even though the eject path passes null.
+    "Win32_Security",
 ] }
 
 # The launcher is started on insert and exits when it is dismissed, so start-up

@@ -83,6 +83,7 @@ dependencies = [
  "serde_json",
  "ureq",
  "urlencoding",
+ "windows-sys",
 ]
 
 [[package]]

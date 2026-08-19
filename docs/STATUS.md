@@ -74,6 +74,12 @@ Ranked by how much it matters.
 2. **Nobody has run this on real hardware.** Every path is unit-tested and the
    frontend is screenshotted, but no cartridge has been written by this code on a
    real drive. That is the next real milestone, not a feature.
+
+   Related, and now fixed: until PR #10 nothing on Windows compiled at all —
+   `gamepak-core` had no `windows-sys` dependency despite calling the Win32
+   volume API, and two more crates were missing feature flags. CI ran core on
+   Linux only, so the failure surfaced in the launcher job and looked like a
+   launcher problem. Core is checked on both operating systems now.
 3. **Version numbers.** Three crates all saying `0.1.0`, moved by hand.
 4. **A cartridge cannot be edited.** Changing a title or swapping the art means
    writing the whole cartridge again, or editing `cartridge.conf` by hand.

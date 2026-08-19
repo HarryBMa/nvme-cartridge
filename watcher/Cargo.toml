@@ -17,6 +17,10 @@ windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_System_LibraryLoader",
     "Win32_UI_WindowsAndMessaging",
+    # RegisterClassW and WNDCLASSW live behind this one, because WNDCLASSW
+    # carries HBRUSH and HICON. The watcher's window is never painted, but the
+    # struct still has to exist to register the class.
+    "Win32_Graphics_Gdi",
 ] }
 
 # Host-gated: rc.exe ships with the MSVC toolchain, so this applies when

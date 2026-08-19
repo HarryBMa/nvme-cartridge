@@ -21,7 +21,7 @@
 //! PowerShell; the link speed is not reported there, and this says so rather
 //! than guessing.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::Serialize;
 
@@ -211,8 +211,8 @@ fn usb_link(sys_root: &Path, block: &str) -> Option<Link> {
 
     // The USB interface directory is the one named like "2-4:1.0"; its driver
     // is uas or usb-storage, and its parent is the device that knows the speed.
-    let mut interface: Option<PathBuf> = None;
-    let mut walked = PathBuf::new();
+    let mut interface: Option<std::path::PathBuf> = None;
+    let mut walked = std::path::PathBuf::new();
     for part in full.components() {
         walked.push(part);
         let name = match part.as_os_str().to_str() {
@@ -248,6 +248,7 @@ fn is_usb_interface(name: &str) -> bool {
     device.contains('-') && device.starts_with(|c: char| c.is_ascii_digit()) && config.contains('.')
 }
 
+#[cfg(not(windows))]
 fn transport_name(driver: &str) -> String {
     match driver {
         "uas" => "UASP".to_string(),
@@ -375,6 +376,7 @@ mod tests {
         assert!(said[1].contains("92%"), "{said:?}");
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn transports_are_named_the_way_the_docs_do() {
         assert_eq!(transport_name("uas"), "UASP");
