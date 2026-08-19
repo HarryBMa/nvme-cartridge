@@ -25,6 +25,7 @@ the wizard make is testable on any machine, in CI, without a webview.
 | `steamlib` | Copies a Steam game onto a cartridge and registers the drive as a Steam library, so Steam plays from the cartridge. |
 | `trim` | Tells the drive which blocks it no longer has to keep. Treats "this enclosure will not" as a fact, not a failure. |
 | `tuning` | The Windows settings worth changing per cartridge, the commands they run, and their exact opposites. |
+| `verify` | CRC-32, taken as each file is copied and checked by reading the cartridge back. Leaves a manifest so the same check can be run later without the original. |
 | `autorun` | Writes `autorun.inf` so Explorer shows the game's name and icon; builds a PNG-in-ICO when the cover allows it. |
 
 ### `tauri-ui/` — one binary, two windows
@@ -83,8 +84,9 @@ Ranked by how much it matters.
 3. **Version numbers.** Three crates all saying `0.1.0`, moved by hand.
 4. **A cartridge cannot be edited.** Changing a title or swapping the art means
    writing the whole cartridge again, or editing `cartridge.conf` by hand.
-5. **No integrity check.** Nothing verifies that a copied game arrived intact.
-   For 60 GB over USB that is worth having.
+5. **Verifying a cartridge you already have.** The manifest is written and
+   checked at copy time, but nothing yet re-checks a cartridge on demand — the
+   pieces are all in `verify`, it needs a command and a button.
 6. **Windows code signing.** Unsigned means SmartScreen on every download.
 7. **macOS** is not supported at all — no watcher, no installer, no icons.
 

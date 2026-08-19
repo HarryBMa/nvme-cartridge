@@ -17,6 +17,8 @@
  * come off an untrusted volume and must never be able to inject markup.
  */
 
+import { connect as connectGamepad } from "./gamepad.js";
+
 const tauri = window.__TAURI__;
 const invoke = tauri?.core?.invoke ?? demoInvoke;
 
@@ -371,6 +373,9 @@ async function init() {
 
   setBusy(false);
   await showWindow();
+  // Only now is there something to point at: with a pad connected the cursor
+  // starts on the first Play button.
+  gamepad.focusFirst();
 }
 
 /* ==========================================================================
@@ -514,6 +519,24 @@ el.eject.addEventListener("click", async () => {
 el.bundleEject.addEventListener("click", async () => {
   if (!cartridge || el.bundleEject.disabled) return;
   await doEject(el.bundleEject.querySelector(".btn__label"));
+});
+
+// A controller reaches the same four things the keyboard does, and nothing
+// more: it moves focus and clicks, so it cannot start anything a person at the
+// keyboard could not.
+const gamepad = connectGamepad({
+  play: () => {
+    if (cartridge?.isBundle && cartridge.games?.length > 0) {
+      el.gameList.querySelector(".game-row__play")?.click();
+    } else {
+      el.play.click();
+    }
+  },
+  details: () => toggleSheet(),
+  back: () => {
+    if (el.sheet.classList.contains("is-open")) toggleSheet(false);
+    else closeWindow();
+  },
 });
 
 el.close.addEventListener("click", closeWindow);

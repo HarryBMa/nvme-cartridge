@@ -76,6 +76,8 @@ const el = {
   progressText: document.getElementById("progress-text"),
   status: document.getElementById("status"),
   optCopyLabel: document.getElementById("opt-copy-label"),
+  optVerifyRow: document.getElementById("opt-verify-row"),
+  optVerify: document.getElementById("opt-verify"),
   optTrimRow: document.getElementById("opt-trim-row"),
   optTrim: document.getElementById("opt-trim"),
   optTuneRow: document.getElementById("opt-tune-row"),
@@ -609,6 +611,10 @@ function refreshOptions() {
   }
   el.optCopyHint.textContent = hint;
 
+  // Only meaningful when files are actually going across.
+  el.optVerifyRow.hidden = !el.optCopy.checked;
+  if (!el.optCopy.checked) el.optVerify.checked = false;
+
   // A format discards the whole volume on its way past, so a TRIM afterwards
   // would be a permission prompt to do nothing.
   el.optTrimRow.hidden = el.optFormat.checked;
@@ -999,6 +1005,7 @@ async function writeCartridge() {
         formatLabel: el.formatLabel.value.trim() || null,
         formatConfirmation: el.formatConfirm.value.trim() || null,
         copyGame: el.optCopy.checked,
+        verifyCopy: el.optVerify.checked,
         trimAfterWrite: el.optTrim.checked,
         collectionCoverSource: collectionCover?.path ?? null,
         games: bundleList.map((g) => ({
@@ -1025,6 +1032,7 @@ async function writeCartridge() {
         formatConfirmation: el.formatConfirm.value.trim() || null,
         copyGame: el.optCopy.checked,
         copyExecutable: el.exePick.hidden ? null : el.exeChoices.value || null,
+        verifyCopy: el.optVerify.checked,
         trimAfterWrite: el.optTrim.checked,
       };
     }
@@ -1046,6 +1054,7 @@ async function writeCartridge() {
       );
     }
     if (result.registeredWithSteam) parts.push("Registered with Steam.");
+    if (result.verified) parts.push(result.verified);
     if (result.trim) parts.push(result.trim);
     if (result.coverWritten) parts.push("Cover art copied.");
     if (result.icon) parts.push("Drive icon set.");
@@ -1215,8 +1224,11 @@ el.btnCollectionCoverClear.addEventListener("click", () => {
   el.btnCollectionCover.querySelector(".btn__label").textContent = "Choose artwork…";
   refreshCollectionPreview();
 });
+el.optVerify.addEventListener("change", refreshCreateButton);
 el.optCopy.addEventListener("change", () => {
-  refreshExePicker();
+  // refreshOptions, not just the exe picker: the rows that only make sense
+  // once files are moving — the check, and its hint — hang off this too.
+  refreshOptions();
   refreshCreateButton();
 });
 el.exeChoices.addEventListener("change", refreshCreateButton);

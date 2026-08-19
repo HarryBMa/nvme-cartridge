@@ -326,12 +326,28 @@ pub fn steam_is_running() -> bool {
 /// A game is tens of gigabytes, so the callback lets the window show progress
 /// instead of appearing to hang.
 pub fn copy_tree(from: &Path, to: &Path, progress: &mut dyn FnMut(u64)) -> std::io::Result<u64> {
+    copy_tree_digesting(from, to, None, progress)
+}
+
+/// Copy a tree, optionally summing every file on the way past.
+///
+/// With `digests` the copy goes through a buffer so each file can be summed as
+/// it is written; without it, `std::fs::copy` does the work, which lets the
+/// platform use whatever fast path it has. The check is opt-in, so the fast
+/// path stays the default one.
+pub fn copy_tree_digesting(
+    from: &Path,
+    to: &Path,
+    digests: Option<&mut crate::verify::Digests>,
+    progress: &mut dyn FnMut(u64),
+) -> std::io::Result<u64> {
     // The running total is threaded through the recursion rather than
     // accumulated per level, so `progress` always receives the total copied so
     // far. Reporting a per-directory subtotal would make a progress bar jump
     // backwards every time the walk entered a new folder.
     let mut total = 0u64;
-    copy_into(from, to, &mut total, progress)?;
+    let mut digests = digests;
+    copy_into(from, to, &mut total, &mut digests, progress)?;
     Ok(total)
 }
 
@@ -339,6 +355,7 @@ fn copy_into(
     from: &Path,
     to: &Path,
     total: &mut u64,
+    digests: &mut Option<&mut crate::verify::Digests>,
     progress: &mut dyn FnMut(u64),
 ) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
@@ -350,9 +367,16 @@ fn copy_into(
         let destination = to.join(entry.file_name());
 
         if file_type.is_dir() {
-            copy_into(&source, &destination, total, progress)?;
+            copy_into(&source, &destination, total, digests, progress)?;
         } else if file_type.is_file() {
-            let bytes = std::fs::copy(&source, &destination)?;
+            let bytes = match digests {
+                Some(digests) => {
+                    let (bytes, crc) = crate::verify::copy_and_digest(&source, &destination)?;
+                    digests.record(&destination, bytes, crc);
+                    bytes
+                }
+                None => std::fs::copy(&source, &destination)?,
+            };
             *total += bytes;
             progress(*total);
         }

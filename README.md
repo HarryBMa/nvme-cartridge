@@ -119,6 +119,28 @@ keys. A cartridge with one game on it still gets the plain Play and Eject pair.
 | `I` | Details |
 | `Esc` | Close details, or dismiss |
 
+### With a controller
+
+A cartridge next to a television wants a controller, not a mouse. Plug one in
+and the launcher picks it up — no setting, and nothing resident: the polling
+loop only exists while a pad is connected and the window is open.
+
+| Control | Action |
+|---|---|
+| D-pad or left stick | Move between the buttons |
+| **A** | Press the focused button |
+| **B** | Back out of details, or dismiss |
+| **Y** | Details |
+| **Start** | Play, or the first game of a collection |
+
+The cursor starts on the first Play button, so a pad and a cartridge is: plug
+in, press A. Holding a direction repeats after a pause, and a controller can
+only move focus and click — exactly what a person at the keyboard can reach, and
+nothing more.
+
+The wizard is deliberately not controller-driven. Making a cartridge is a
+desk job.
+
 </details>
 
 <a id="making-a-cartridge"></a>
@@ -171,6 +193,26 @@ own — what to call it, and what it should look like:
 
 Copying works the same for a collection as for a single game: tick the box and
 every game goes across, each Play button pointing at its own copy.
+
+### Checking the copy
+
+`std::fs::copy` reports success for every byte the kernel accepted, which is not
+the same as every byte arriving on the drive. When a copy over USB goes wrong it
+goes wrong quietly, and you find out later, in a level you have not played yet.
+
+**Check the copy afterwards** sums every file with CRC-32 as it is written —
+free next to a USB write — then reads the cartridge back and compares. It names
+what is wrong rather than just failing: a missing file, a half-written one with
+both byte counts, or one that arrived with different contents.
+
+It is opt-in because it costs one extra pass over the drive, so it roughly adds
+the time the copy itself took. The file list is left on the cartridge at
+`.gamepak/manifest.json`, so the same check can be run later on a machine that no
+longer has the original.
+
+This is an integrity check, not a signature: CRC-32 is the right tool for *did
+this survive the cable*, the job it does in zip and gzip, and the wrong tool for
+*did somebody change this on purpose*.
 
 ### What it can put on the cartridge
 

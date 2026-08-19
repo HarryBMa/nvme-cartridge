@@ -154,6 +154,19 @@
             <p class="field__hint" id="exe-hint"></p>
           </div>
 
+          <label class="opt" id="opt-verify-row" hidden>
+            <input id="opt-verify" type="checkbox" />
+            <span class="opt__body">
+              <span class="opt__label">Check the copy afterwards</span>
+              <span class="opt__hint">
+                Sums every file as it is written, then reads the cartridge back
+                and compares. Catches the copy that silently half-finished — one
+                extra pass over the drive, so it roughly adds the time the copy
+                itself took to read back.
+              </span>
+            </span>
+          </label>
+
           <label class="opt" id="opt-trim-row" hidden>
             <input id="opt-trim" type="checkbox" />
             <span class="opt__body">

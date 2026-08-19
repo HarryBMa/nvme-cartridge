@@ -26,5 +26,6 @@ pub mod steam;
 pub mod steamlib;
 pub mod trim;
 pub mod tuning;
+pub mod verify;
 
 pub use cartridge::base64_encode;

@@ -315,6 +315,14 @@
   border-color: oklch(1 0 0 / 0.08);
 }
 
+/* With a controller in hand the focus ring is the only way to see where you
+   are, so it stops being :focus-visible-only and is always drawn. */
+body.is-gamepad :focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 5px;
+}
+
 /* Connection notes, under the details table. Only present when there is
    something worth saying about the link, the transport or the free space. */
 #health {
