@@ -285,6 +285,101 @@ The drive name follows the filesystem: exFAT allows 11 characters, btrfs has
 room for the whole title. On Linux the relevant mount options are set by the
 desktop environment or `/etc/fstab`.
 
+## Getting the most out of a cartridge
+
+A game running from a cartridge is running over USB, and USB is the slowest
+part of the machine. Most of what people blame on that is not actually the
+drive, so this is in order: check the boring things first, then the storage.
+
+### It is usually not the storage
+
+**Shader compilation.** Modern DX12 and Vulkan games compile pipeline state
+objects the first time each one is needed, and that stutter looks exactly like a
+slow disk. The compiled cache lives on your internal drive, not the cartridge,
+and it is keyed to GPU *and* driver version — so moving a cartridge to a second
+PC, or updating your driver, throws it away and the first hour stutters again.
+
+- NVIDIA Control Panel → Manage 3D settings → **Shader Cache Size → 10 GB** or
+  Unlimited. The default is small enough that a big game evicts its own cache.
+- On Steam, leave **Shader Pre-Caching** on. On Linux it is doing most of the
+  work for you.
+
+**VRAM.** A texture pool set above your VRAM budget spills over PCIe and hitches
+in a way that reads as storage. Drop textures one notch and see whether the
+stutter goes before touching anything else.
+
+Neither of these gets better with a faster cartridge.
+
+### The connection, which the launcher will tell you about
+
+Press `I` on the launcher and it reports three things about the drive in front
+of it:
+
+<img width="420" alt="The launcher's details sheet showing link speed, transport and free space, with plain-language notes about what to do" src="docs/launcher-health.png" />
+
+- **Link** — 10 Gbps is what a Gen 2 enclosure should negotiate. 5 Gbps means a
+  front-panel port, a hub, or a cable that is not rated for it; 480 Mbps means
+  USB 2.0, and games will stream badly.
+- **Transport** — **UASP** queues commands; **BOT** sends one at a time. On the
+  small random reads a game streams that is worth roughly two to three times as
+  much, and which one you get depends on the enclosure's firmware and the port.
+- **Space** — see below.
+
+### Leave the drive some room
+
+Almost every M.2 2230 drive is DRAM-less. On an internal slot that is fine: it
+borrows host RAM over PCIe — the **Host Memory Buffer** — to hold its flash
+translation table. **A USB bridge does not provide HMB**, so the translation
+table is paged from the flash itself, and it gets worse the fuller the drive is.
+
+Keep roughly **15% free** and the difference is measurable on random reads. The
+wizard says so when a cartridge crosses 85%, and the launcher repeats it.
+
+Free space only helps if the drive knows about it, which is what TRIM is for,
+and nothing sends TRIM to removable media on a schedule. The wizard offers
+**Release freed space back to the drive** when it is not formatting. Some
+enclosures do not pass the command through at all — it will say so plainly if
+yours is one of them, which is a good reason to keep the headroom anyway.
+
+### Windows settings worth changing
+
+The wizard's **Tune Windows for this cartridge** does the first two, per
+cartridge, showing the exact commands first and offering to undo them:
+
+- **Defender exclusion.** Real-time scanning walks a freshly copied 60 GB game
+  the first time anything reads it, competing for the link you are trying to
+  stream over.
+- **Search indexing off** for the volume, for the same reason in the background.
+
+The third is worth doing by hand, once per cartridge:
+
+- **Device Manager → Disk drives → your cartridge → Policies → Better
+  performance.** Windows sets removable drives to *Quick removal*, which turns
+  write caching off entirely. *Better performance* is the right setting for a
+  drive that is always ejected properly — which is what this launcher's Eject
+  button is for. It is left as a manual step because the supported way to set it
+  is that dialog; the registry keys behind it are per-device and undocumented,
+  and this tool does not guess at those.
+
+### Do not put a pagefile or swap on a cartridge
+
+It comes up, and it is a bad idea three ways over. Windows will not page to a
+disk it considers removable, and cannot page to exFAT at all. More importantly,
+a failed read of a game asset is a retry, while a failed read of *swap* is a
+bugcheck on Windows or a hard freeze on Linux — and a USB link that resets under
+thermal load is a normal Tuesday. And it is backwards for stutter: swapping puts
+*more* traffic on the slowest link in the machine.
+
+If a game is short of RAM, add RAM. On Linux, `zram` gives you compressed swap
+inside memory with no device involved.
+
+### Install once, cleanly
+
+exFAT's allocator is simple, so a game copied onto a freshly formatted cartridge
+stays contiguous, and churning installs on and off it does not. Format, copy,
+play. Sustained writes also heat the enclosure — that affects how long the copy
+takes, not how the game runs.
+
 ## Cartridge format
 
 A cartridge is a text file and some art, so you can make one by hand. Copy
