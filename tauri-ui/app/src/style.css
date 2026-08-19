@@ -257,6 +257,12 @@
   animation: rise 520ms 380ms var(--ease) both;
 }
 
+/* `display` on an id selector beats the browser's [hidden] rule, so a
+   collection would otherwise keep the single-game Play and a second Eject. */
+#button-row[hidden] {
+  display: none;
+}
+
 /* Primary: the only filled surface in the window. */
 .btn--play {
   flex: 1;
@@ -404,6 +410,11 @@
 }
 
 #game-list[hidden] {
+  display: none;
+}
+
+/* No art for this game: the frame would just be an empty box. */
+.game-row__cover:not([src]) {
   display: none;
 }
 

@@ -262,7 +262,15 @@ fn mime_from_ext(path: &Path) -> &'static str {
     }
 }
 
+/// Inline a picture for the window to show.
+///
+/// Capped at the same size a cartridge cover is: this is handed arbitrary files
+/// once the user can pick one from disk, and base64 costs a third again on top
+/// of whatever they chose.
 pub fn read_as_data_uri(path: &Path) -> Option<String> {
+    if std::fs::metadata(path).ok()?.len() > crate::cartridge::MAX_COVER_BYTES {
+        return None;
+    }
     let bytes = std::fs::read(path).ok()?;
     Some(format!(
         "data:{};base64,{}",
@@ -296,14 +304,42 @@ fn endpoint_for(game_id: u32, art_type: ArtworkType) -> String {
     }
 }
 
+/// The one gate every request passes through.
+///
+/// SteamGridDB is the only thing in this project that talks to the network, so
+/// it stays switched off until someone turns it on, and it is refused here
+/// rather than in the window — a setting the UI merely hides is not a setting.
+fn api_key() -> Result<String, String> {
+    api_key_from(&crate::settings::load())
+}
+
+fn api_key_from(settings: &crate::settings::Settings) -> Result<String, String> {
+    if !settings.steamgriddb_enabled {
+        return Err(
+            "SteamGridDB lookup is switched off. Turn it on in the wizard's settings.".to_string(),
+        );
+    }
+    settings
+        .steamgriddb_key()
+        .map(str::to_string)
+        .ok_or_else(|| {
+            "SteamGridDB needs a personal API key. Add one in the wizard's settings.".to_string()
+        })
+}
+
 fn request_with_retry(url: &str) -> Result<Vec<u8>, String> {
+    let key = api_key()?;
     let agent = ureq::AgentBuilder::new()
         .user_agent(USER_AGENT)
         .timeout(Duration::from_secs(15))
         .build();
 
     for attempt in 0..DEFAULT_RETRIES {
-        let response = agent.get(url).call();
+        // Their v2 API refuses anything unauthenticated.
+        let response = agent
+            .get(url)
+            .set("Authorization", &format!("Bearer {key}"))
+            .call();
         match response {
             Ok(resp) => {
                 let mut reader = resp.into_reader();
@@ -436,6 +472,33 @@ mod tests {
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn no_request_is_made_until_the_user_opts_in() {
+        use crate::settings::Settings;
+
+        // The default install is offline, and says why rather than failing
+        // somewhere in the middle of a request.
+        let err = api_key_from(&Settings::default()).unwrap_err();
+        assert!(err.contains("switched off"), "{err}");
+
+        // On but unkeyed is its own message: their v2 API refuses anything
+        // unauthenticated, so "on" alone would just produce a 401.
+        let err = api_key_from(&Settings {
+            steamgriddb_enabled: true,
+            steamgriddb_api_key: String::new(),
+        })
+        .unwrap_err();
+        assert!(err.contains("API key"), "{err}");
+
+        assert_eq!(
+            api_key_from(&Settings {
+                steamgriddb_enabled: true,
+                steamgriddb_api_key: "abc123".into(),
+            }),
+            Ok("abc123".to_string())
+        );
+    }
 
     #[test]
     fn sanitizes_cache_keys() {

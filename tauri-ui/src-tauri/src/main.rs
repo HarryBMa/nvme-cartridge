@@ -16,6 +16,10 @@
 //
 // Wizard commands:
 //   list_games()                             -> Vec<GameInfo>  (Playnite + Steam)
+//   get_settings()                           -> Settings
+//   set_settings(settings)                   -> Settings
+//   suggest_collection_name(titles)          -> String
+//   pick_cover_image()                       -> PickedCover | null
 //   game_cover(library, id)                  -> String (data URI)
 //   list_target_drives()                     -> Vec<TargetDrive>
 //   format_plan(drive_path)                  -> FormatPlan
@@ -35,11 +39,12 @@
 // All of the real work lives in cartridge-core, which has no UI dependency and
 // so can be tested without a webview. This file is the Tauri shell around it.
 use cartridge_core::cartridge::{self, CartridgeInfo};
-use cartridge_core::{create, drives, format, sgdb};
+use cartridge_core::{create, drives, format, settings, sgdb};
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::{Emitter, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_dialog::DialogExt;
 
 // --------------------------------------------------------------------------
 // Tauri commands
@@ -309,6 +314,60 @@ fn game_cover(library: create::Library, id: String) -> String {
     create::game_cover(library, &id)
 }
 
+/// What the user has switched on. Read on open, so the wizard can hide what is
+/// off — though the backend refuses either way.
+#[tauri::command]
+fn get_settings() -> settings::Settings {
+    settings::load()
+}
+
+/// Store the settings and hand back what was stored, so the window and the file
+/// cannot drift apart.
+#[tauri::command]
+fn set_settings(settings: settings::Settings) -> Result<settings::Settings, String> {
+    settings::save(&settings)?;
+    Ok(settings)
+}
+
+/// A picture the user chose for a collection's artwork.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PickedCover {
+    /// Handed back with the create request, so the file is copied from here.
+    path: String,
+    /// The picture itself, for the wizard's preview. Empty when it is too big
+    /// to inline; the build then refuses it with a proper message.
+    preview: String,
+}
+
+/// Ask for artwork through the desktop's own file dialog.
+///
+/// The window never names a path: it gets one back only after the user has
+/// pointed at a file themselves. This is also the offline way to give a
+/// collection its own art, with no SteamGridDB lookup involved.
+#[tauri::command]
+async fn pick_cover_image(window: tauri::WebviewWindow) -> Option<PickedCover> {
+    let file = window
+        .dialog()
+        .file()
+        .set_title("Choose collection artwork")
+        .add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp"])
+        .blocking_pick_file()?;
+
+    let path = file.into_path().ok()?;
+    Some(PickedCover {
+        preview: sgdb::read_as_data_uri(&path).unwrap_or_default(),
+        path: path.to_string_lossy().into_owned(),
+    })
+}
+
+/// A name for a cartridge carrying several games, worked out from what they are
+/// called. The wizard offers it; the user can always type their own.
+#[tauri::command]
+fn suggest_collection_name(titles: Vec<String>) -> String {
+    create::suggest_collection_name(&titles)
+}
+
 #[tauri::command]
 fn sgdb_search_games(query: String) -> Result<Vec<sgdb::SteamGridGame>, String> {
     sgdb::search_games(&query)
@@ -401,6 +460,7 @@ fn main() {
     let wizard = std::env::args().skip(1).any(|arg| arg == "--create");
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             drive_path,
             parse_cartridge,
@@ -408,6 +468,10 @@ fn main() {
             eject_drive,
             list_games,
             game_cover,
+            get_settings,
+            set_settings,
+            suggest_collection_name,
+            pick_cover_image,
             sgdb_search_games,
             sgdb_get_artwork,
             sgdb_download_artwork,

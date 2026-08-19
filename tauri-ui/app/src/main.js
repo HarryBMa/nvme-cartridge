@@ -297,7 +297,7 @@ async function init() {
     el.gameList.hidden = false;
     el.bundleEjectRow.hidden = false;
     el.bundleEject.disabled = false;
-    el.eyebrow.textContent = "Collection";
+    el.eyebrow.textContent = `Collection · ${cartridge.games.length} games`;
     renderGameList(cartridge.games);
   }
 
@@ -455,6 +455,17 @@ el.sheetClose.addEventListener("click", () => toggleSheet(false));
 document.addEventListener("keydown", (event) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return;
   const sheetOpen = el.sheet.classList.contains("is-open");
+
+  // 1-9 start the nth game of a collection, so a cartridge you know can be
+  // played without reaching for the mouse or arrowing down the list.
+  if (!sheetOpen && cartridge?.isBundle && /^[1-9]$/.test(event.key)) {
+    const button = el.gameList.querySelectorAll(".game-row__play")[Number(event.key) - 1];
+    if (button) {
+      event.preventDefault();
+      button.click();
+    }
+    return;
+  }
 
   switch (event.key) {
     case "Enter":

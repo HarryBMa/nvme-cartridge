@@ -135,9 +135,21 @@ The accent colour is sampled from the cover art at load, so the Play button
 belongs to whatever game is in the dock. Everything the launcher knows beyond
 the title lives behind the gear, because you rarely need it.
 
+### More than one game on a cartridge
+
+A 256 GB drive holds a series, not a game. Put several on one cartridge and the
+launcher shows the collection's artwork and title with **one Play button per
+game** — no menu, no submenu, nothing to learn.
+
+<img width="420" alt="The launcher showing a collection: the artwork behind a list of games, each with its own Play button, and Eject below" src="docs/launcher-bundle.png" />
+
+Each row carries the game's own art, and the first nine answer to the number
+keys. A cartridge with one game on it still gets the plain Play and Eject pair.
+
 | Key | Action |
 |-----|--------|
-| `Enter` | Play |
+| `Enter` | Play, or the first game of a collection |
+| `1`–`9` | Play the *n*th game of a collection |
 | `E` | Eject |
 | `I` | Details |
 | `Esc` | Close details, or dismiss |
@@ -156,7 +168,8 @@ The wizard lists everything installed. **Playnite** is read first when present �
 one list covering Steam, GOG, Epic, Xbox, Ubisoft, itch and emulators — and
 Steam's own manifests are read too, which is the only source on Linux. Cover art
 comes from whichever cache the game came from, so **nothing is fetched**; the
-wizard works with no network at all.
+wizard **works offline**, with the optional SteamGridDB integration switched
+off — see [Artwork from SteamGridDB](#artwork-from-steamgriddb) to turn it on.
 
 Playnite is detected automatically on Windows (the standard `%APPDATA%\Playnite`
 location and portable installs in `Program Files`) and on Linux through every
@@ -170,6 +183,24 @@ can point the wizard at the right directory.
 > `games.json` file will work.
 
 Pick a game, pick the drive, choose what goes on it, press Write.
+
+### Collections
+
+Add a second game with the **+** beside it and the cartridge becomes a
+collection. The wizard then asks for the two things it cannot work out on its
+own — what to call it, and what it should look like:
+
+<img width="760" alt="The wizard with two games added to a bundle: the collection preview, a collection name field, a Choose artwork button, and the copy option covering both games" src="docs/wizard-bundle.png" />
+
+- **The name** is suggested from what the games share — *God of War* and *God of
+  War Ragnarök* give *God of War Collection* — and can be typed over.
+- **The artwork** is whatever picture you point at, through the desktop's own
+  file dialog. Without one the first game's cover stands in.
+- **The order** is the order you added them in, and it is the order of the Play
+  buttons in the launcher.
+
+Copying works the same for a collection as for a single game: tick the box and
+every game goes across, each Play button pointing at its own copy.
 
 ### What it can put on the cartridge
 
@@ -196,6 +227,25 @@ Steam-sourced cover usually leaves the default icon in place.
 
 **Games in no library at all** can be entered by hand with any supported URI or a
 path on the cartridge.
+
+### Artwork from SteamGridDB
+
+Some games have no cached art at all — anything added to Playnite by hand,
+emulator entries, older GOG titles — and the launcher then shows a placeholder.
+The wizard can look artwork up on [SteamGridDB](https://www.steamgriddb.com/)
+to fill those gaps.
+
+<img width="760" alt="The wizard's settings: a switch for SteamGridDB lookup, off by default, and a field for a personal API key" src="docs/wizard-settings.png" />
+
+**It is off by default**, and it is the only part of this project that talks to
+the network. Turn it on behind the gear in the wizard's title bar, where it also
+asks for a personal API key — their API refuses unauthenticated requests, so the
+lookup does nothing without one. The key is stored on this machine only, next to
+the artwork cache, and the backend refuses every request while the setting is
+off, so hiding the button is not the only thing keeping it quiet.
+
+With it off you can still give a cartridge any picture you like: **Choose
+artwork…** opens the desktop's own file dialog and copies whatever you point at.
 
 ### Formatting erases the drive
 
@@ -314,8 +364,11 @@ allowlist along with it.
 - **The launcher window cannot read your disk.** The webview has no filesystem
   access and no command that takes a path. The cover is read in Rust, from a path
   confined to the cartridge, and passed in as a `data:` URI.
-- **Nothing is fetched.** Fonts are bundled, the cover is inlined, and the
-  content-security policy is `default-src 'self'`.
+- **Nothing is fetched**, with the optional SteamGridDB integration switched off.
+  Fonts are bundled, the cover is inlined, and the content-security policy is
+  `default-src 'self'`. The launcher never has a reason to reach the network at
+  all; only the wizard does, and only once you have turned the lookup on and
+  given it a key.
 - **Titles are text, never markup.** They come off an untrusted volume and are
   inserted with `textContent`.
 - **Eject asks twice** when the game lives on the cartridge, since pulling a drive

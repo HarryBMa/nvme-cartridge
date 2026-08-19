@@ -19,6 +19,7 @@ pub mod drives;
 pub mod format;
 pub mod playnite;
 pub mod portable;
+pub mod settings;
 pub mod sgdb;
 pub mod steam;
 pub mod steamlib;
