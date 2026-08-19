@@ -41,7 +41,7 @@ The page serves a sample cartridge when it is opened outside Tauri, so the
 window can be worked on without a physical drive:
 
 ```bash
-npx http-server tauri-ui     # → http://localhost:8080/?drive=/demo
+npx http-server tauri-ui/app     # → http://localhost:8080/?drive=/demo
 ```
 
 Append `&state=noexec` to see the case where `cartridge.conf` sets no
@@ -69,8 +69,10 @@ npm run build     # → src-tauri/target/release/pc-cartridge-launcher
 npm run dev       # run it against a drive, for development
 ```
 
-There is no bundler: `index.html` and `src/` are shipped as-is, which is why
-`frontendDist` points at this directory.
+There is no bundler: the files in `app/` are shipped as-is, which is why
+`frontendDist` points there. It is a directory of its own rather than the whole
+of `tauri-ui/`, because Tauri embeds everything under `frontendDist` into the
+binary — including, if it were allowed to, `src-tauri/target/`.
 
 ## The create-cartridge wizard
 
@@ -176,13 +178,16 @@ Supported URI schemes: `steam://`, `heroic://`, `gog://`, `epic://`,
 
 ```
 tauri-ui/
-├── index.html                  # Main HTML shell
-├── src/
-│   ├── main.js                 # Frontend logic (Tauri invoke calls)
-│   ├── style.css               # Popup styles
-│   ├── fonts/                  # Bundled woff2 (Archivo, Spline Sans Mono)
-│   └── demo/                   # Sample cover art for browser preview
-├── create.html                 # The create-cartridge wizard
+├── app/                        # everything shipped to the webview
+│   ├── index.html              # Main HTML shell
+│   ├── create.html             # The create-cartridge wizard
+│   └── src/
+│       ├── main.js             # Launcher logic (Tauri invoke calls)
+│       ├── create.js           # Wizard logic
+│       ├── style.css           # Popup styles
+│       ├── create.css          # Wizard styles
+│       ├── fonts/              # Bundled woff2 (Archivo, Spline Sans Mono)
+│       └── demo/               # Sample cover art for browser preview
 ├── src-tauri/
 │   ├── Cargo.toml
 │   ├── build.rs

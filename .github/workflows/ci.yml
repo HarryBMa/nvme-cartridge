@@ -83,7 +83,7 @@ jobs:
           node-version: "20"
       - name: Check the JavaScript parses
         run: |
-          for file in tauri-ui/src/*.js tools/*.mjs; do
+          for file in tauri-ui/app/src/*.js tools/*.mjs; do
             echo "checking $file"
             node --check "$file"
           done

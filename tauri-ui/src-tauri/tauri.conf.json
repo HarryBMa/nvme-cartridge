@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "identifier": "com.pc-cartridge.launcher",
   "build": {
-    "frontendDist": ".."
+    "frontendDist": "../app"
   },
   "app": {
     "withGlobalTauri": true,
