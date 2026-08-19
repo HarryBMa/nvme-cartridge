@@ -42,9 +42,9 @@ case "$OPTION" in
         ;;
     2)
         clear 2>/dev/null || printf "\033c"
-        LAUNCHER="/usr/local/bin/pc-cartridge-launcher"
+        LAUNCHER="/usr/local/bin/pc-gamepak"
         # Prefer a local build so the wizard can be used before installing.
-        BUILT="$SCRIPT_DIR/tauri-ui/src-tauri/target/release/pc-cartridge-launcher"
+        BUILT="$SCRIPT_DIR/tauri-ui/src-tauri/target/release/pc-gamepak"
         [ -x "$BUILT" ] && LAUNCHER="$BUILT"
 
         if [ ! -x "$LAUNCHER" ]; then

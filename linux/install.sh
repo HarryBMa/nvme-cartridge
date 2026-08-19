@@ -7,16 +7,16 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-echo "Installing PC Cartridge System..."
+echo "Installing PC GamePak..."
 
 # Check for important files
 
 for FILE in \
-    "linux/cartridge-launcher-helper.sh" \
-    "linux/cartridge-remove-helper.sh" \
-    "linux/game-cartridge@.service" \
-    "linux/game-cartridge-remove@.service" \
-    "linux/99-game-cartridge.rules"
+    "linux/gamepak-launcher-helper.sh" \
+    "linux/gamepak-remove-helper.sh" \
+    "linux/pc-gamepak@.service" \
+    "linux/pc-gamepak-remove@.service" \
+    "linux/99-pc-gamepak.rules"
 do
     if [ ! -f "$FILE" ]; then
         echo "Missing file: $FILE"
@@ -46,8 +46,8 @@ echo "Home directory: $USER_HOME"
 
 echo "Installing launcher helper..."
 
-install -m 755 linux/cartridge-launcher-helper.sh /usr/local/bin/pc-cartridge-system-helper
-install -m 755 linux/eject.sh /usr/local/bin/pc-cartridge-eject
+install -m 755 linux/gamepak-launcher-helper.sh /usr/local/bin/pc-gamepak-helper
+install -m 755 linux/eject.sh /usr/local/bin/pc-gamepak-eject
 
 
 ########################################
@@ -57,12 +57,12 @@ install -m 755 linux/eject.sh /usr/local/bin/pc-cartridge-eject
 echo "Installing systemd service..."
 
 sed "s/__USERNAME__/$USERNAME/g" \
-    "linux/game-cartridge@.service" \
-    > /etc/systemd/system/game-cartridge@.service
+    "linux/pc-gamepak@.service" \
+    > /etc/systemd/system/pc-gamepak@.service
 
 sed "s/__USERNAME__/$USERNAME/g" \
-    "linux/game-cartridge-remove@.service" \
-    > /etc/systemd/system/game-cartridge-remove@.service
+    "linux/pc-gamepak-remove@.service" \
+    > /etc/systemd/system/pc-gamepak-remove@.service
 
 
 ########################################
@@ -71,7 +71,7 @@ sed "s/__USERNAME__/$USERNAME/g" \
 
 echo "Installing removal helper..."
 
-install -m 755 linux/cartridge-remove-helper.sh /usr/local/bin/pc-cartridge-system-remove
+install -m 755 linux/gamepak-remove-helper.sh /usr/local/bin/pc-gamepak-remove
 
 
 ########################################
@@ -80,7 +80,7 @@ install -m 755 linux/cartridge-remove-helper.sh /usr/local/bin/pc-cartridge-syst
 
 echo "Installing udev rule..."
 
-install -m 644 linux/99-game-cartridge.rules /etc/udev/rules.d/99-game-cartridge.rules
+install -m 644 linux/99-pc-gamepak.rules /etc/udev/rules.d/99-pc-gamepak.rules
 
 
 ########################################
@@ -102,11 +102,11 @@ udevadm trigger
 # Install the launcher binary if it has been built
 ########################################
 
-LAUNCHER_BUILD="tauri-ui/src-tauri/target/release/pc-cartridge-launcher"
+LAUNCHER_BUILD="tauri-ui/src-tauri/target/release/pc-gamepak"
 
 if [ -f "$LAUNCHER_BUILD" ]; then
     echo "Installing launcher..."
-    install -m 755 "$LAUNCHER_BUILD" /usr/local/bin/pc-cartridge-launcher
+    install -m 755 "$LAUNCHER_BUILD" /usr/local/bin/pc-gamepak
     LAUNCHER_STATE="installed"
 else
     LAUNCHER_STATE="not built yet"
@@ -119,7 +119,7 @@ fi
 
 echo ""
 echo "=========================================="
-echo " PC Cartridge System installed"
+echo " PC GamePak installed"
 echo "=========================================="
 echo ""
 echo " Launcher: $LAUNCHER_STATE"

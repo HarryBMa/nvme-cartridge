@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 const API_BASE: &str = "https://www.steamgriddb.com/api/v2";
 const DEFAULT_MAX_AGE_DAYS: u64 = 30;
 const DEFAULT_RETRIES: usize = 4;
-const USER_AGENT: &str = "pc-cartridge-system/0.1";
+const USER_AGENT: &str = "pc-gamepak/0.1";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -93,7 +93,7 @@ fn cache_root() -> PathBuf {
         if let Ok(local) = std::env::var("LOCALAPPDATA") {
             if !local.trim().is_empty() {
                 return PathBuf::from(local)
-                    .join("PC-Cartridge-System")
+                    .join("PC-GamePak")
                     .join("sgdb-cache");
             }
         }
@@ -105,7 +105,7 @@ fn cache_root() -> PathBuf {
         PathBuf::from(home)
             .join(".local")
             .join("state")
-            .join("pc-cartridge-system")
+            .join("pc-gamepak")
             .join("sgdb-cache")
     }
 }

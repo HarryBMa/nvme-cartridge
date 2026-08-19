@@ -26,7 +26,7 @@ pub fn render_autorun(label: &str, icon: Option<&str>) -> String {
     if let Some(icon) = icon {
         out.push_str(&format!("icon={}\r\n", sanitize_inf_value(icon)));
     }
-    out.push_str("\r\n; Written by the PC Cartridge System create wizard.\r\n");
+    out.push_str("\r\n; Written by the PC GamePak create wizard.\r\n");
     out.push_str("; label and icon only - this cartridge is launched by the\r\n");
     out.push_str("; launcher app, never by Windows autorun.\r\n");
     out

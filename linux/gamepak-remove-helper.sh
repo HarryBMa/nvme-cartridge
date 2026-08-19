@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Called by game-cartridge-remove@.service when a partition is unplugged.
+# Called by pc-gamepak-remove@.service when a partition is unplugged.
 #
 # Closes the launcher window if it was showing the cartridge that just left. It
 # does not touch the game: pulling a cartridge while the game is running is the
@@ -20,7 +20,7 @@ if [ -z "$DEVICE" ]; then
     exit 2
 fi
 
-STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/pc-cartridge-system"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/pc-gamepak"
 mkdir -p "$STATE_DIR"
 exec >>"$STATE_DIR/helper.log" 2>&1
 
@@ -31,7 +31,7 @@ echo "==== $(date -Is) cartridge removed: $DEVICE ===="
 # window.
 CLOSED=0
 
-for PID in $(pgrep -x pc-cartridge-launcher 2>/dev/null || true); do
+for PID in $(pgrep -x pc-gamepak 2>/dev/null || true); do
     # argv is NUL-separated; --drive is followed by the mount point.
     mapfile -d '' -t ARGS < "/proc/$PID/cmdline" 2>/dev/null || continue
 

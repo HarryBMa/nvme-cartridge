@@ -10,7 +10,7 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  # The logic that can be checked anywhere. cartridge-core has no UI dependency
+  # The logic that can be checked anywhere. gamepak-core has no UI dependency
   # on purpose, so this needs no webkit, no display and no Windows.
   core:
     name: core logic

@@ -5,8 +5,8 @@
 //! cover art come from caches Steam and Playnite have already written — and it
 //! stays that way until someone opts in.
 //!
-//! The file lives beside the artwork cache: `%LOCALAPPDATA%\PC-Cartridge-System`
-//! on Windows, `~/.local/state/pc-cartridge-system` elsewhere.
+//! The file lives beside the artwork cache: `%LOCALAPPDATA%\PC-GamePak`
+//! on Windows, `~/.local/state/pc-gamepak` elsewhere.
 
 use std::path::{Path, PathBuf};
 
@@ -34,10 +34,10 @@ impl Settings {
     }
 }
 
-/// Where the settings file lives. `PC_CARTRIDGE_CONFIG_DIR` overrides it, which
+/// Where the settings file lives. `PC_GAMEPAK_CONFIG_DIR` overrides it, which
 /// is what the tests use.
 pub fn settings_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("PC_CARTRIDGE_CONFIG_DIR") {
+    if let Ok(dir) = std::env::var("PC_GAMEPAK_CONFIG_DIR") {
         if !dir.trim().is_empty() {
             return PathBuf::from(dir);
         }
@@ -46,7 +46,7 @@ pub fn settings_dir() -> PathBuf {
     {
         if let Ok(local) = std::env::var("LOCALAPPDATA") {
             if !local.trim().is_empty() {
-                return PathBuf::from(local).join("PC-Cartridge-System");
+                return PathBuf::from(local).join("PC-GamePak");
             }
         }
         PathBuf::from(".")
@@ -57,7 +57,7 @@ pub fn settings_dir() -> PathBuf {
         PathBuf::from(home)
             .join(".local")
             .join("state")
-            .join("pc-cartridge-system")
+            .join("pc-gamepak")
     }
 }
 

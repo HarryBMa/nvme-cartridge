@@ -1,15 +1,15 @@
 [package]
-name = "pc-cartridge-launcher"
+name = "pc-gamepak"
 version = "0.1.0"
 edition = "2021"
-description = "Popup launcher for the PC Cartridge System"
+description = "Popup launcher for the PC GamePak"
 license = "MIT"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-cartridge-core = { path = "../../core" }
+gamepak-core = { path = "../../core" }
 # No "protocol-asset": the cover is handed to the webview as a data URI, so the
 # asset protocol stays switched off (see tauri.conf.json).
 tauri = { version = "2", features = [] }

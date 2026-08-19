@@ -1,4 +1,4 @@
-# PC Cartridge Launcher — Tauri UI
+# PC GamePak — Tauri UI
 
 A compact popup that appears when a cartridge is inserted.
 Built with **Tauri 2.0** (Rust backend) and plain HTML/CSS/JS — no framework, no
@@ -65,7 +65,7 @@ sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev \
 ```bash
 cd tauri-ui
 npm install
-npm run build     # → src-tauri/target/release/pc-cartridge-launcher
+npm run build     # → src-tauri/target/release/pc-gamepak
 npm run dev       # run it against a drive, for development
 ```
 
@@ -80,7 +80,7 @@ The same binary, started with `--create`, opens the wizard that writes
 cartridges:
 
 ```bash
-pc-cartridge-launcher --create
+pc-gamepak --create
 ```
 
 ![The create-cartridge wizard](../docs/wizard.png)
@@ -132,10 +132,10 @@ only.
 ## When nothing happens
 
 The Windows watcher writes to
-`%LOCALAPPDATA%\PC-Cartridge-System\watcher.log`, which is the first place to
+`%LOCALAPPDATA%\PC-GamePak\watcher.log`, which is the first place to
 look when a cartridge does not open the launcher — it records every volume
 arrival and why each one was or was not acted on. The Linux helper logs to
-`~/.local/state/pc-cartridge-system/helper.log`.
+`~/.local/state/pc-gamepak/helper.log`.
 
 ## How it gets started
 
@@ -143,12 +143,12 @@ The launcher takes the cartridge's mount point on the command line and shows one
 cartridge per window:
 
 ```bash
-pc-cartridge-launcher --drive /run/media/you/CARTRIDGE   # Linux
-pc-cartridge-launcher.exe --drive "D:\"                  # Windows
+pc-gamepak --drive /run/media/you/CARTRIDGE   # Linux
+pc-gamepak.exe --drive "D:\"                  # Windows
 ```
 
 Nothing on the cartridge invokes it. On Linux a udev rule starts
-`linux/cartridge-launcher-helper.sh`, which waits for the automount and then runs
+`linux/gamepak-launcher-helper.sh`, which waits for the automount and then runs
 the launcher; on Windows `watcher/` sees the volume arrive and does the same. See
 the [main README](../README.md) for the full path.
 
@@ -204,7 +204,7 @@ tauri-ui/
 └── package.json
 ```
 
-The logic behind those commands lives in the `cartridge-core` crate at `core/`,
+The logic behind those commands lives in the `gamepak-core` crate at `core/`,
 which has no UI dependency so its tests run without a webview:
 
 ```

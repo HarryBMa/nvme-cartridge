@@ -192,7 +192,7 @@ pub fn append_library_entry(text: &str, drive: &str) -> String {
 /// knows which entries are ours. Entries are never removed automatically: a
 /// cartridge is *supposed* to be unplugged most of the time, so a missing folder
 /// is the normal state, not stale cruft.
-pub const CARTRIDGE_LABEL: &str = "PC Cartridge";
+pub const CARTRIDGE_LABEL: &str = "PC GamePak";
 
 /// Whether `drive` is currently listed in Steam's library folders.
 pub fn is_registered(steam_root: &Path, drive: &Path) -> bool {
@@ -554,7 +554,7 @@ mod unregister_tests {
 	"1"
 	{
 		"path"		"/run/media/harry/CINDER"
-		"label"		"PC Cartridge"
+		"label"		"PC GamePak"
 		"apps"
 		{
 		}

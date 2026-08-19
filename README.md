@@ -6,7 +6,7 @@
 <a href="https://ko-fi.com/harrybma">Support my work!</a>
 
 
-# PC Gamepak Cartridge
+# PC GamePak
 
 **Turn removable storage into physical game cartridges.**
 Plug one in and a launcher appears with the game's cover art and two buttons.
@@ -19,9 +19,11 @@ Plug one in and a launcher appears with the game's cover art and two buttons.
 
 ## The idea
 
-A cartridge is a small NVMe drive in a pocketable enclosure with one game on it.
-Push it into a USB-C port; the launcher opens showing what's on it. Press **Play**
-to start the game, or **Eject** to power the drive down and pull it out.
+A cartridge is a small drive in a pocketable enclosure with a game on it — an
+M.2 2230 NVMe stick in the build documented here, though nothing in the software
+requires that. Push it into a USB-C port; the launcher opens showing what's on
+it. Press **Play** to start the game, or **Eject** to power the drive down and
+pull it out.
 
 It's the console-cartridge feeling, using hardware that already exists — and it
 genuinely offloads a game off your internal disk, which is the practical half of
@@ -113,7 +115,7 @@ while it waits.
 | | Idle |
 |---|---|
 | **Linux** | **Nothing resident.** udev is already part of the OS; the rule adds no process. |
-| **Windows** | **One process, ~2 MB, 0% CPU.** `pc-cartridge-watcher.exe` blocks on the Windows message queue — no polling, no timer. |
+| **Windows** | **One process, ~2 MB, 0% CPU.** `pc-gamepak-watcher.exe` blocks on the Windows message queue — no polling, no timer. |
 
 The launcher is a webview, so it is not small *while it is on screen* — expect
 around 100 MB for the few seconds it is up, then it exits and gives all of it
@@ -159,7 +161,7 @@ keys. A cartridge with one game on it still gets the plain Play and Eject pair.
 Run the installer menu and choose **Create a cartridge**, or start it directly:
 
 ```bash
-pc-cartridge-launcher --create
+pc-gamepak --create
 ```
 
 <img width="760" alt="The create-cartridge wizard: searchable game list on the left, cover preview, drive picker and options on the right" src="docs/wizard.png" />
@@ -342,7 +344,7 @@ cd tauri-ui && npm install && npm run build && cd ..
 **Linux**
 
 ```bash
-./cartridge-linux.sh          # → 1) Install
+./gamepak-linux.sh          # → 1) Install
 ```
 
 Installs the udev rule, the systemd template unit, the mount helper and the
@@ -352,10 +354,10 @@ launcher binary.
 
 ```powershell
 cd watcher; cargo build --release; cd ..
-# Right-click cartridge-windows.ps1 → Run with PowerShell → 1) Install
+# Right-click gamepak-windows.ps1 → Run with PowerShell → 1) Install
 ```
 
-Installs the watcher and launcher to `%LOCALAPPDATA%\PC-Cartridge-System` and
+Installs the watcher and launcher to `%LOCALAPPDATA%\PC-GamePak` and
 registers a logon task.
 
 **Platforms:** Windows and Linux. macOS is not supported — there is no watcher,
@@ -390,7 +392,7 @@ allowlist along with it.
 ### Cartridges in Steam's library list
 
 A cartridge you copied a Steam game onto is registered in `libraryfolders.vdf`,
-labelled `PC Cartridge`. Those entries are never removed automatically: a
+labelled `PC GamePak`. Those entries are never removed automatically: a
 cartridge is *meant* to spend most of its life unplugged, so a missing folder is
 the normal state rather than stale cruft. When you reformat or repurpose one, the
 wizard offers **Remove this drive from Steam's library list**. Steam must be
@@ -398,7 +400,7 @@ closed.
 
 ## Working on it
 
-The logic lives in `core/` (crate `cartridge-core`), deliberately free of any UI
+The logic lives in `core/` (crate `gamepak-core`), deliberately free of any UI
 dependency, so the tests run anywhere:
 
 ```bash
@@ -415,8 +417,8 @@ verifies every element the scripts reach for exists in the HTML — the UI ships
 unbundled, so a missing id is a runtime crash rather than a build error.
 
 ```
-cartridge-linux.sh          installer menu (Linux)
-cartridge-windows.ps1       installer menu (Windows)
+gamepak-linux.sh          installer menu (Linux)
+gamepak-windows.ps1       installer menu (Windows)
 cartridge.conf.example      the one file a cartridge needs
 core/                       cartridge logic, no UI — this is where the tests are
 linux/                      udev rule, systemd units, mount + eject helpers
@@ -427,8 +429,8 @@ docs/                       screenshots
 ```
 
 When a cartridge does not open the launcher, the logs are the first place to
-look: `%LOCALAPPDATA%\PC-Cartridge-System\watcher.log` on Windows,
-`~/.local/state/pc-cartridge-system/helper.log` on Linux.
+look: `%LOCALAPPDATA%\PC-GamePak\watcher.log` on Windows,
+`~/.local/state/pc-gamepak/helper.log` on Linux.
 
 ## Uninstall
 
@@ -438,7 +440,7 @@ units on Linux, or the logon task and install folder on Windows.
 ## Thanks
 
 This project began as a fork of
-**[LewdM3at/PC-Cartridge-System](https://github.com/LewdM3at/PC-Cartridge-System)**,
+**[LewdM3at/PC-GamePak](https://github.com/LewdM3at/PC-GamePak)**,
 which had the original idea and the first working implementation: the udev rule,
 the systemd template unit and the Windows monitor that make insert-detection work
 at all. The shape of the Linux side is still recognisably theirs.

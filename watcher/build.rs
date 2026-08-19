@@ -1,4 +1,4 @@
-//! Embeds the app icon and version metadata into pc-cartridge-watcher.exe.
+//! Embeds the app icon and version metadata into pc-gamepak-watcher.exe.
 //!
 //! Without this the watcher shows the default Rust executable icon in Task
 //! Manager, the logon-task list and Explorer — the one place a user goes
@@ -27,11 +27,11 @@ fn main() {
 
     let mut resource = winresource::WindowsResource::new();
     resource.set_icon(ICON);
-    resource.set("ProductName", "PC Cartridge System");
+    resource.set("ProductName", "PC GamePak");
     resource.set("FileDescription", "Cartridge watcher");
-    resource.set("CompanyName", "PC Cartridge System contributors");
+    resource.set("CompanyName", "PC GamePak contributors");
     resource.set("LegalCopyright", "MIT licensed");
-    resource.set("OriginalFilename", "pc-cartridge-watcher.exe");
+    resource.set("OriginalFilename", "pc-gamepak-watcher.exe");
 
     if let Err(error) = resource.compile() {
         println!("cargo:warning=could not embed the icon: {error}");

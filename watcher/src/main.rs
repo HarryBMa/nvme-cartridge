@@ -7,7 +7,7 @@
 //!
 //! On Linux none of this is needed — udev is already running as part of the OS
 //! and starts the launcher through a systemd unit, so there is no resident
-//! process at all. See `linux/99-game-cartridge.rules`.
+//! process at all. See `linux/99-pc-gamepak.rules`.
 //!
 //! Flow: volume arrives -> is there a cartridge.conf on it? -> start the
 //! launcher with `--drive X:\` and go back to sleep.
@@ -21,7 +21,7 @@ mod log;
 #[cfg(not(windows))]
 fn main() {
     eprintln!(
-        "pc-cartridge-watcher is only needed on Windows.\n\
+        "pc-gamepak-watcher is only needed on Windows.\n\
          On Linux, install the udev rule instead: sudo ./linux/install.sh"
     );
     std::process::exit(1);
@@ -122,7 +122,7 @@ mod windows_watcher {
             CreateWindowExW(
                 0,
                 class_name.as_ptr(),
-                wide("PC Cartridge Watcher").as_ptr(),
+                wide("PC GamePak Watcher").as_ptr(),
                 WS_OVERLAPPED,
                 0,
                 0,
@@ -247,7 +247,7 @@ mod windows_watcher {
             .ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::NotFound, "no install directory")
             })?
-            .join("pc-cartridge-launcher.exe");
+            .join("pc-gamepak.exe");
 
         Command::new(exe)
             .arg("--drive")

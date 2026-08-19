@@ -1,5 +1,5 @@
 /**
- * PC Cartridge Launcher — main.js
+ * PC GamePak — main.js
  *
  * Reads the drive path from the query string (?drive=D%3A%5C), asks the Rust
  * backend what is on the cartridge, and wires up Play and Eject.

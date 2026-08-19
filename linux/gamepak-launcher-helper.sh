@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Started by game-cartridge@.service when udev sees a partition appear.
+# Started by pc-gamepak@.service when udev sees a partition appear.
 #
 # Its whole job is to wait for the desktop to mount the cartridge and then open
 # the launcher on it. Nothing is executed from the cartridge here: the launcher
@@ -20,7 +20,7 @@ if [ -z "$DEVICE" ]; then
     exit 2
 fi
 
-STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/pc-cartridge-system"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/pc-gamepak"
 mkdir -p "$STATE_DIR"
 LOG_FILE="$STATE_DIR/helper.log"
 
@@ -55,7 +55,7 @@ if [ ! -f "$MOUNT_POINT/cartridge.conf" ] && [ ! -f "$MOUNT_POINT/autorun.inf" ]
     exit 0
 fi
 
-LAUNCHER="${PC_CARTRIDGE_LAUNCHER:-/usr/local/bin/pc-cartridge-launcher}"
+LAUNCHER="${PC_CARTRIDGE_LAUNCHER:-/usr/local/bin/pc-gamepak}"
 
 if [ ! -x "$LAUNCHER" ]; then
     echo "launcher not found at $LAUNCHER"

@@ -1,9 +1,9 @@
-// PC Cartridge Launcher — Tauri 2.0 backend
+// PC GamePak — Tauri 2.0 backend
 //
 // One binary, two modes, chosen by the arguments it was started with:
 //
-//   pc-cartridge-launcher --drive <path>    the popup, opened on insert
-//   pc-cartridge-launcher --create          the create-cartridge wizard
+//   pc-gamepak --drive <path>    the popup, opened on insert
+//   pc-gamepak --create          the create-cartridge wizard
 //
 // Exactly one window is built, so the wizard costs nothing when a cartridge is
 // inserted and the popup costs nothing while making one.
@@ -36,10 +36,10 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-// All of the real work lives in cartridge-core, which has no UI dependency and
+// All of the real work lives in gamepak-core, which has no UI dependency and
 // so can be tested without a webview. This file is the Tauri shell around it.
-use cartridge_core::cartridge::{self, CartridgeInfo};
-use cartridge_core::{create, drives, format, settings, sgdb};
+use gamepak_core::cartridge::{self, CartridgeInfo};
+use gamepak_core::{create, drives, format, settings, sgdb};
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -416,7 +416,7 @@ fn format_plan(drive_path: String) -> Result<format::FormatPlan, String> {
 #[tauri::command]
 fn executable_choices(
     playnite_id: String,
-) -> Result<Vec<cartridge_core::portable::Candidate>, String> {
+) -> Result<Vec<gamepak_core::portable::Candidate>, String> {
     create::executable_choices(&playnite_id)
 }
 
@@ -496,7 +496,7 @@ fn main() {
                     .build()?;
             } else {
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                    .title("PC Cartridge")
+                    .title("PC GamePak")
                     .inner_size(420.0, 560.0)
                     .resizable(false)
                     .decorations(false)

@@ -1172,7 +1172,7 @@ pub fn validate_executable(executable: &str, root: &Path) -> Result<(), String> 
 /// Render the conf file, with a header explaining where it came from.
 pub fn render_cartridge_conf(title: &str, executable: &str, cover: Option<&str>) -> String {
     let mut out = String::new();
-    out.push_str("# PC Cartridge System\n");
+    out.push_str("# PC GamePak\n");
     out.push_str("# Written by the create-cartridge wizard. Safe to edit by hand.\n");
     out.push('\n');
     out.push_str(&format!("title={title}\n"));
@@ -1191,7 +1191,7 @@ pub fn render_bundle_conf(
     games: &[(&str, &str, Option<&str>)],
 ) -> String {
     let mut out = String::new();
-    out.push_str("# PC Cartridge System\n");
+    out.push_str("# PC GamePak\n");
     out.push_str("# Written by the create-cartridge wizard. Safe to edit by hand.\n");
     out.push('\n');
     out.push_str("[collection]\n");

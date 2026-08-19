@@ -1,5 +1,5 @@
 [package]
-name = "pc-cartridge-watcher"
+name = "pc-gamepak-watcher"
 version = "0.1.0"
 edition = "2021"
 description = "Waits for a cartridge to be plugged in and opens the launcher"

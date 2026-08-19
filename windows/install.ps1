@@ -1,9 +1,9 @@
-# PC Cartridge System installer (Windows)
+# PC GamePak installer (Windows)
 #
 # Installs two native binaries and a logon task:
 #
-#   pc-cartridge-watcher.exe   resident, waits for a volume to arrive
-#   pc-cartridge-launcher.exe  the popup, started by the watcher on insert
+#   pc-gamepak-watcher.exe   resident, waits for a volume to arrive
+#   pc-gamepak.exe  the popup, started by the watcher on insert
 #
 # The watcher replaces the old resident PowerShell monitor. PowerShell kept the
 # .NET runtime and a WMI subscription alive for the whole session to do this job;
@@ -13,23 +13,23 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host ""
-Write-Host "Installing PC Cartridge System..."
+Write-Host "Installing PC GamePak..."
 Write-Host ""
 
 ########################################
 # Paths
 ########################################
 
-$InstallFolder = Join-Path $env:LOCALAPPDATA "PC-Cartridge-System"
+$InstallFolder = Join-Path $env:LOCALAPPDATA "PC-GamePak"
 $RepoRoot      = Split-Path -Parent $PSScriptRoot
 
-$WatcherSource  = Join-Path $RepoRoot "watcher\target\release\pc-cartridge-watcher.exe"
-$LauncherSource = Join-Path $RepoRoot "tauri-ui\src-tauri\target\release\pc-cartridge-launcher.exe"
+$WatcherSource  = Join-Path $RepoRoot "watcher\target\release\pc-gamepak-watcher.exe"
+$LauncherSource = Join-Path $RepoRoot "tauri-ui\src-tauri\target\release\pc-gamepak.exe"
 
-$WatcherTarget  = Join-Path $InstallFolder "pc-cartridge-watcher.exe"
-$LauncherTarget = Join-Path $InstallFolder "pc-cartridge-launcher.exe"
+$WatcherTarget  = Join-Path $InstallFolder "pc-gamepak-watcher.exe"
+$LauncherTarget = Join-Path $InstallFolder "pc-gamepak.exe"
 
-$TaskName = "PC Cartridge System Watcher"
+$TaskName = "PC GamePak Watcher"
 
 ########################################
 # Check the binaries have been built
@@ -62,7 +62,7 @@ Write-Host "Creating install directory..."
 New-Item -ItemType Directory -Path $InstallFolder -Force | Out-Null
 
 # Stop a running watcher before overwriting it.
-Get-Process -Name "pc-cartridge-watcher" -ErrorAction SilentlyContinue |
+Get-Process -Name "pc-gamepak-watcher" -ErrorAction SilentlyContinue |
     Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 400
 
@@ -76,8 +76,8 @@ Copy-Item -Path $LauncherSource -Destination $LauncherTarget -Force
 
 # Remove tasks from previous versions, including the PowerShell monitor.
 $OldTaskNames = @(
-    "PC Cartridge System Watcher",
-    "PC Cartridge System Monitor",
+    "PC GamePak Watcher",
+    "PC GamePak Monitor",
     "Steam Game Cartridge Monitor"
 )
 
@@ -118,7 +118,7 @@ Start-ScheduledTask -TaskName $TaskName
 
 Write-Host ""
 Write-Host "=========================================="
-Write-Host " PC Cartridge System installed"
+Write-Host " PC GamePak installed"
 Write-Host "=========================================="
 Write-Host ""
 Write-Host " Put a cartridge.conf at the root of the drive:"

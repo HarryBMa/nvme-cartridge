@@ -1,5 +1,5 @@
 [package]
-name = "cartridge-core"
+name = "gamepak-core"
 version = "0.1.0"
 edition = "2021"
 description = "Cartridge logic shared by the launcher and the wizard, free of any UI"

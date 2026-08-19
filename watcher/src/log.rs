@@ -16,11 +16,11 @@ use std::path::PathBuf;
 /// grow an unbounded file.
 const MAX_BYTES: u64 = 256 * 1024;
 
-/// `%LOCALAPPDATA%\PC-Cartridge-System\watcher.log`, matching where the
+/// `%LOCALAPPDATA%\PC-GamePak\watcher.log`, matching where the
 /// installer puts everything else.
 fn log_path() -> Option<PathBuf> {
     let base = std::env::var_os("LOCALAPPDATA")?;
-    let dir = PathBuf::from(base).join("PC-Cartridge-System");
+    let dir = PathBuf::from(base).join("PC-GamePak");
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir.join("watcher.log"))
 }

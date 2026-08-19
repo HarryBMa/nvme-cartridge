@@ -25,7 +25,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pc-cartridge-watcher"
+name = "pc-gamepak-watcher"
 version = "0.1.0"
 dependencies = [
  "windows-sys",

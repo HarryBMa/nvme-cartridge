@@ -267,16 +267,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cartridge-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "ureq",
- "urlencoding",
-]
-
-[[package]]
 name = "cc"
 version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -917,6 +907,16 @@ dependencies = [
  "memchr",
  "pin-project-lite",
  "slab",
+]
+
+[[package]]
+name = "gamepak-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "ureq",
+ "urlencoding",
 ]
 
 [[package]]
@@ -2161,10 +2161,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "pc-cartridge-launcher"
+name = "pc-gamepak"
 version = "0.1.0"
 dependencies = [
- "cartridge-core",
+ "gamepak-core",
  "serde",
  "tauri",
  "tauri-build",
