@@ -154,6 +154,34 @@
             <p class="field__hint" id="exe-hint"></p>
           </div>
 
+          <label class="opt" id="opt-trim-row" hidden>
+            <input id="opt-trim" type="checkbox" />
+            <span class="opt__body">
+              <span class="opt__label">Release freed space back to the drive</span>
+              <span class="opt__hint">
+                Deleting files frees them in the filesystem, but the drive keeps
+                treating those blocks as used until something tells it otherwise —
+                and nothing sends TRIM to removable media on a schedule. Needs the
+                same permission prompt formatting does.
+              </span>
+            </span>
+          </label>
+
+          <label class="opt" id="opt-tune-row" hidden>
+            <input id="opt-tune" type="checkbox" />
+            <span class="opt__body">
+              <span class="opt__label">Tune Windows for this cartridge</span>
+              <span class="opt__hint">
+                Excludes the cartridge from Defender's real-time scanning and turns
+                off Search indexing for it — both of which otherwise crawl a freshly
+                copied 60&nbsp;GB game. Asks for administrator once per setting, and
+                can be undone.
+                <button id="btn-tune-commands" class="link" type="button">Show the commands</button>
+                <button id="btn-tune-undo" class="link" type="button" hidden>Undo them</button>
+              </span>
+            </span>
+          </label>
+
           <label class="opt opt--danger">
             <input id="opt-format" type="checkbox" />
             <span class="opt__body">

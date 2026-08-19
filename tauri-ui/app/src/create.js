@@ -12,6 +12,10 @@
  *   sgdb_get_artwork({ gameId, artType }) -> [{ id, url, thumb, width, height }]
  *   sgdb_download_artwork({ url, cacheKey, gameKey? }) -> "/abs/path/image.jpg"
  *   sgdb_last_used_artwork({ gameKey }) -> { path, dataUri } | null
+ *   pick_cover_image()               -> { path, preview } | null
+ *   host_platform()                  -> "windows" | "linux" | …
+ *   tuning_plan({ drivePath, tweaks, applying })  -> [command, …]
+ *   apply_tuning({ drivePath, tweaks, applying }) -> [what was done, …]
  *   list_target_drives()             -> [{ path, label, totalBytes, freeBytes, hasCartridge }]
  *   format_plan({ drivePath })       -> { path, currentLabel, device, totalBytes, warning }
  *   executable_choices({ playniteId }) -> [{ relative, name, score }]  best first
@@ -72,6 +76,12 @@ const el = {
   progressText: document.getElementById("progress-text"),
   status: document.getElementById("status"),
   optCopyLabel: document.getElementById("opt-copy-label"),
+  optTrimRow: document.getElementById("opt-trim-row"),
+  optTrim: document.getElementById("opt-trim"),
+  optTuneRow: document.getElementById("opt-tune-row"),
+  optTune: document.getElementById("opt-tune"),
+  btnTuneCommands: document.getElementById("btn-tune-commands"),
+  btnTuneUndo: document.getElementById("btn-tune-undo"),
   btnCollectionCover: document.getElementById("btn-collection-cover"),
   btnCollectionCoverClear: document.getElementById("btn-collection-cover-clear"),
   btnSettings: document.getElementById("btn-settings"),
@@ -110,6 +120,10 @@ let exeCandidates = [];
 let selectedCoverSource = null;
 /** True while the drive name is the one we derived, not one that was typed. */
 let labelIsOurs = true;
+/** Which OS this is, so the wizard offers only what exists here. */
+let platform = "";
+/** The Windows settings this wizard knows how to change, and put back. */
+const TWEAKS = ["defender", "indexing"];
 /** What the user has switched on. Offline until they say otherwise. */
 let settings = { steamgriddbEnabled: false, steamgriddbApiKey: "" };
 /** Artwork chosen for the collection: { path, preview }. */
@@ -595,6 +609,14 @@ function refreshOptions() {
   }
   el.optCopyHint.textContent = hint;
 
+  // A format discards the whole volume on its way past, so a TRIM afterwards
+  // would be a permission prompt to do nothing.
+  el.optTrimRow.hidden = el.optFormat.checked;
+  if (el.optFormat.checked) el.optTrim.checked = false;
+
+  el.optTuneRow.hidden = platform !== "windows";
+  if (platform !== "windows") el.optTune.checked = false;
+
   refreshExePicker();
 }
 
@@ -977,6 +999,7 @@ async function writeCartridge() {
         formatLabel: el.formatLabel.value.trim() || null,
         formatConfirmation: el.formatConfirm.value.trim() || null,
         copyGame: el.optCopy.checked,
+        trimAfterWrite: el.optTrim.checked,
         collectionCoverSource: collectionCover?.path ?? null,
         games: bundleList.map((g) => ({
           title: g.name,
@@ -1002,6 +1025,7 @@ async function writeCartridge() {
         formatConfirmation: el.formatConfirm.value.trim() || null,
         copyGame: el.optCopy.checked,
         copyExecutable: el.exePick.hidden ? null : el.exeChoices.value || null,
+        trimAfterWrite: el.optTrim.checked,
       };
     }
 
@@ -1022,9 +1046,14 @@ async function writeCartridge() {
       );
     }
     if (result.registeredWithSteam) parts.push("Registered with Steam.");
+    if (result.trim) parts.push(result.trim);
     if (result.coverWritten) parts.push("Cover art copied.");
     if (result.icon) parts.push("Drive icon set.");
     parts.push(...(result.warnings ?? []));
+
+    if (el.optTune.checked && platform === "windows") {
+      parts.push(...(await runTuning(true)));
+    }
 
     status(parts.join(" "), result.warnings?.length ? "" : "good");
     showProgress(false);
@@ -1039,6 +1068,46 @@ async function writeCartridge() {
     building = false;
     el.rescan.disabled = false;
     refreshCreateButton();
+  }
+}
+
+/* ----------------------------------------------------------------- tuning */
+
+/**
+ * Apply or undo the Windows settings for the chosen drive.
+ *
+ * Returns sentences to add to the status line. A failure here never fails the
+ * cartridge — it is already written by this point.
+ */
+async function runTuning(applying) {
+  try {
+    const done = await invoke("apply_tuning", {
+      drivePath: selectedDrive,
+      tweaks: TWEAKS,
+      applying,
+    });
+    if (applying) el.btnTuneUndo.hidden = false;
+    return done;
+  } catch (error) {
+    return [String(error)];
+  }
+}
+
+/** Show exactly what would run, before anything is elevated. */
+async function showTuningCommands() {
+  if (!selectedDrive) {
+    status("Choose the cartridge first, so the commands name the right drive.");
+    return;
+  }
+  try {
+    const commands = await invoke("tuning_plan", {
+      drivePath: selectedDrive,
+      tweaks: TWEAKS,
+      applying: true,
+    });
+    status(`These run as administrator, one prompt each: ${commands.join("  ·  ")}`);
+  } catch (error) {
+    status(String(error), "error");
   }
 }
 
@@ -1110,6 +1179,14 @@ el.customExec.addEventListener("input", refreshCreateButton);
 el.collectionTitle.addEventListener("input", () => {
   refreshCreateButton();
   refreshCollectionPreview();
+});
+el.btnTuneCommands.addEventListener("click", showTuningCommands);
+el.btnTuneUndo.addEventListener("click", async () => {
+  el.btnTuneUndo.disabled = true;
+  const said = await runTuning(false);
+  status(said.join(" "));
+  el.btnTuneUndo.hidden = true;
+  el.btnTuneUndo.disabled = false;
 });
 el.btnSettings.addEventListener("click", openSettings);
 el.settingsSave.addEventListener("click", saveSettings);
@@ -1202,6 +1279,11 @@ async function start() {
   if (tauri?.event) {
     tauri.event.listen("cartridge://progress", (event) => onProgress(event.payload));
   }
+  try {
+    platform = await invoke("host_platform");
+  } catch {
+    platform = "";
+  }
   await Promise.all([loadSettings(), loadGames(), loadDrives()]);
   refreshOptions();
   if (tauri?.window) await tauri.window.getCurrentWindow().show();
@@ -1258,6 +1340,17 @@ async function demoInvoke(command, args) {
         ? `${shared.join(" ")} Collection`
         : `${args.titles[0]} and ${args.titles.length - 1} more`;
     }
+    case "host_platform":
+      return "linux";
+    case "tuning_plan":
+      return [
+        "Add-MpPreference -ExclusionPath 'D:\\'",
+        "Get-CimInstance -ClassName Win32_Volume -Filter \"DriveLetter='D:'\" | Set-CimInstance -Property @{IndexingEnabled=$false}",
+      ];
+    case "apply_tuning":
+      return args.applying
+        ? ["Excluded the cartridge from Defender scanning.", "Search indexing switched off for the cartridge."]
+        : ["Defender scans the cartridge again.", "Search indexing switched back on."];
     case "pick_cover_image":
       return { path: "/home/harry/Pictures/collection.jpg", preview: "src/demo/cover.jpg" };
     case "game_cover":

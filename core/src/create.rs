@@ -18,7 +18,12 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::drives::{self, TargetDrive};
-use crate::{autorun, format, playnite, portable, sgdb, steam, steamlib};
+use crate::{autorun, format, health, playnite, portable, sgdb, steam, steamlib, trim};
+
+/// Past this, a DRAM-less drive behind a USB bridge has little room for its
+/// garbage collector to work in. Matches health.rs, which says the same thing
+/// about a cartridge that is merely plugged in.
+const CROWDED_PERCENT: u8 = 85;
 
 /// Largest cover we will copy onto a cartridge.
 const MAX_COVER_BYTES: u64 = 8 * 1024 * 1024;
@@ -122,6 +127,13 @@ pub struct CartridgeRequest {
     /// Absolute path to the collection's cover image for a bundle.
     #[serde(default)]
     pub collection_cover_source: Option<String>,
+    /// Ask the drive to release freed blocks once everything is written.
+    ///
+    /// Only worth it when the cartridge was not formatted first — mkfs already
+    /// discards the whole volume — and it needs the same authentication prompt
+    /// formatting does, so it is never implied.
+    #[serde(default)]
+    pub trim_after_write: bool,
 }
 
 impl CartridgeRequest {
@@ -170,6 +182,10 @@ pub struct CartridgeResult {
     pub registered_with_steam: bool,
     /// Where the game was copied to, relative to the cartridge root.
     pub game_folder: Option<String>,
+    /// How full the cartridge ended up, 0-100.
+    pub used_percent: u8,
+    /// What came of the TRIM, when one was asked for.
+    pub trim: Option<String>,
     pub warnings: Vec<String>,
 }
 
@@ -376,6 +392,8 @@ pub fn create_cartridge(
         bytes_copied: 0,
         registered_with_steam: false,
         game_folder: None,
+        used_percent: 0,
+        trim: None,
         warnings: Vec::new(),
     };
 
@@ -580,6 +598,7 @@ pub fn create_cartridge(
             );
         }
 
+        finish(request, &root, &mut result, &mut warnings, progress);
         result.warnings = warnings;
         return Ok(result);
     }
@@ -676,8 +695,44 @@ pub fn create_cartridge(
         );
     }
 
+    finish(request, &root, &mut result, &mut warnings, progress);
     result.warnings = warnings;
     Ok(result)
+}
+
+/// The last thing every build does, whatever shape the cartridge was.
+///
+/// Releases freed blocks if asked, then reports how full the drive ended up —
+/// which matters more here than on an internal disk, because a DRAM-less drive
+/// behind a USB bridge has no host memory to lean on and needs the room.
+fn finish(
+    request: &CartridgeRequest,
+    root: &Path,
+    result: &mut CartridgeResult,
+    warnings: &mut Vec<String>,
+    progress: &mut dyn FnMut(Progress),
+) {
+    if request.trim_after_write {
+        progress(Progress {
+            step: "trim",
+            message: "Releasing free space back to the drive…".to_string(),
+            done_bytes: 0,
+            total_bytes: 0,
+        });
+        let outcome = trim::trim(&root.to_string_lossy());
+        result.trim = Some(outcome.message());
+    }
+
+    let health = health::inspect(&root.to_string_lossy());
+    result.used_percent = health.used_percent;
+    if health.used_percent >= CROWDED_PERCENT {
+        warnings.push(format!(
+            "The cartridge is {}% full. These drives have no DRAM of their own and cannot \
+             borrow host memory over USB, so keeping 15% or so spare is what keeps random \
+             reads quick.",
+            health.used_percent
+        ));
+    }
 }
 
 /// What a copy produced.

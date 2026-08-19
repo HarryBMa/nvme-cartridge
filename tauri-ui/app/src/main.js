@@ -8,6 +8,7 @@
  *   parse_cartridge({ drivePath })            -> { title, cover, cover_path, executable, drive_path }
  *   launch_game({ executable, drivePath })    -> ()
  *   eject_drive({ drivePath })                -> ()
+ *   cartridge_health({ drivePath })           -> { link, transport, usedPercent, warnings[] }
  *
  * `cover` arrives as a data URI already. There is no command that takes a path
  * to read, so the webview cannot ask the backend for arbitrary files.
@@ -33,6 +34,7 @@ const el = {
   sheet: document.getElementById("sheet"),
   sheetClose: document.getElementById("btn-sheet-close"),
   specs: document.getElementById("specs"),
+  health: document.getElementById("health"),
   toast: document.getElementById("toast"),
   gameList: document.getElementById("game-list"),
   bundleEjectRow: document.getElementById("bundle-eject-row"),
@@ -40,6 +42,8 @@ const el = {
 };
 
 let cartridge = null;
+/** The connection is only looked at once, and only if the sheet is opened. */
+let healthAsked = false;
 
 /* ==========================================================================
    Accent colour, sampled from the cover art
@@ -173,16 +177,80 @@ function specRow(label, value, muted = false) {
 }
 
 function renderSpecs(info) {
-  el.specs.replaceChildren(
-    specRow("Title", info.title || "—", !info.title),
-    specRow("Launch", info.executable || "nothing configured", !info.executable),
+  const rows = [specRow("Title", info.title || "—", !info.title)];
+  const games = info.games ?? [];
+
+  if (games.length > 1) {
+    // One row per game, so the sheet says exactly what each button starts.
+    rows.push(specRow("Games", String(games.length)));
+    for (const game of games) rows.push(specRow(game.title, game.executable));
+  } else {
+    rows.push(specRow("Launch", info.executable || "nothing configured", !info.executable));
+  }
+
+  rows.push(
     specRow("Drive", info.drive_path || "—"),
     specRow("Cover", info.cover_path || "none found", !info.cover_path),
   );
+  el.specs.replaceChildren(...rows);
+}
+
+/**
+ * How the cartridge is connected, filled in after the sheet is open.
+ *
+ * Three things decide whether a cartridge performs like the drive inside it —
+ * the negotiated link, UASP or BOT, and how full it is — and none of them are
+ * visible anywhere else. Asked for lazily: on Windows this shells out, and the
+ * launcher opening late is worse than the sheet filling in late.
+ */
+async function renderHealth() {
+  if (!cartridge?.drive_path || healthAsked) return;
+  healthAsked = true;
+
+  let health;
+  try {
+    health = await invoke("cartridge_health", { drivePath: cartridge.drive_path });
+  } catch {
+    return; // The sheet is still useful without it.
+  }
+
+  const rows = [];
+  if (health.link) rows.push(specRow("Link", health.link));
+  if (health.transport) rows.push(specRow("Transport", health.transport));
+  if (health.totalBytes > 0) {
+    rows.push(
+      specRow("Space", `${formatBytes(health.freeBytes)} free · ${health.usedPercent}% full`),
+    );
+  }
+  el.specs.append(...rows);
+
+  // Anything worth saying gets said in full, under the table.
+  el.health.replaceChildren(
+    ...(health.warnings ?? []).map((text) => {
+      const p = document.createElement("p");
+      p.className = "health__note";
+      p.textContent = text;
+      return p;
+    }),
+  );
+  el.health.hidden = (health.warnings ?? []).length === 0;
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let value = bytes;
+  while (value >= 1000 && i < units.length - 1) {
+    value /= 1000;
+    i += 1;
+  }
+  return `${value.toFixed(value >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 function toggleSheet(open) {
   const next = open ?? !el.sheet.classList.contains("is-open");
+  if (next) renderHealth();
   el.sheet.classList.toggle("is-open", next);
   el.sheet.hidden = !next;
   el.details.setAttribute("aria-expanded", String(next));
@@ -546,6 +614,21 @@ async function demoInvoke(command, args) {
         drive_path: args.drivePath,
         isBundle: false,
         games: [],
+      };
+    case "cartridge_health":
+      // The preview shows the case worth designing for: a link that is fine,
+      // a transport that is not, and a drive with no room left.
+      return {
+        link: "10 Gbps",
+        linkMbps: 10000,
+        transport: "BOT",
+        totalBytes: 128_035_676_160,
+        freeBytes: 9_663_676_416,
+        usedPercent: 92,
+        warnings: [
+          "Running in BOT mode, which sends one command at a time. UASP queues them and is worth roughly two to three times as much on the small random reads a game streams. Usually a different port or enclosure firmware fixes it.",
+          "92% full. These drives have no DRAM of their own and cannot borrow host memory over USB, so the last 15% costs more than it looks like it should. Leaving some room back keeps random reads quick.",
+        ],
       };
     default:
       console.log("[preview]", command, args);

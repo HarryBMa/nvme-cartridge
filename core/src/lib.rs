@@ -17,11 +17,14 @@ pub mod cartridge;
 pub mod create;
 pub mod drives;
 pub mod format;
+pub mod health;
 pub mod playnite;
 pub mod portable;
 pub mod settings;
 pub mod sgdb;
 pub mod steam;
 pub mod steamlib;
+pub mod trim;
+pub mod tuning;
 
 pub use cartridge::base64_encode;

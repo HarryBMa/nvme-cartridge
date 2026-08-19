@@ -33,6 +33,15 @@ use crate::drives;
 const BTRFS_MAX_LABEL: usize = 256;
 const EXFAT_MAX_LABEL: usize = 11;
 
+/// Allocation unit for a cartridge's exFAT filesystem.
+///
+/// A cartridge holds a few enormous files, not many small ones, so the largest
+/// practical cluster is the right trade: fewer allocation-table lookups per
+/// gigabyte read, and a fragmentation pattern that stays sequential. The cost —
+/// up to 128 KB wasted per file — is nothing against a 60 GB game. Left to
+/// itself mkfs.exfat picks by volume size and lands lower on a 128 GB drive.
+const EXFAT_CLUSTER_BYTES: &str = "128K";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Filesystem {
@@ -269,13 +278,21 @@ fn run_format(plan: &FormatPlan, filesystem: Filesystem, label: &str) -> Result<
     // exFAT is built into Windows. btrfs is not: it needs WinBtrfs
     // (https://github.com/maharmstone/btrfs) installed first, which is why it
     // is an option here rather than the default.
+    // exFAT gets the same 128 KB allocation unit the Linux path asks for, so a
+    // cartridge is laid out identically whichever machine made it. btrfs has no
+    // equivalent knob here and takes its own default.
+    let allocation = match filesystem {
+        Filesystem::Exfat => " -AllocationUnitSize 131072",
+        Filesystem::Btrfs => "",
+    };
     let script = format!(
         "$ErrorActionPreference='Stop'; \
-         Format-Volume -DriveLetter {} -FileSystem {} -NewFileSystemLabel '{}' \
+         Format-Volume -DriveLetter {} -FileSystem {} -NewFileSystemLabel '{}'{} \
          -Confirm:$false -Force",
         letter.trim_end_matches(':'),
         filesystem.display_name(),
-        label.replace('\'', "''")
+        label.replace('\'', "''"),
+        allocation
     );
 
     let status = Command::new("powershell.exe")
@@ -363,6 +380,8 @@ pub fn mkfs_command(
             ],
             Filesystem::Exfat => vec![
                 "mkfs.exfat".to_string(),
+                "-c".to_string(),
+                EXFAT_CLUSTER_BYTES.to_string(),
                 "-n".to_string(),
                 label.to_string(),
                 device.to_string(),
@@ -461,7 +480,12 @@ mod tests {
     fn exfat_mkfs_arguments_are_in_the_right_order() {
         let (program, args) = mkfs_command("/dev/sdb1", Filesystem::Exfat, "Cinder");
         assert_eq!(program, "pkexec");
-        assert_eq!(args, vec!["mkfs.exfat", "-n", "Cinder", "/dev/sdb1"]);
+        // The cluster size is set rather than left to mkfs, which picks by
+        // volume size and lands lower than a cartridge wants.
+        assert_eq!(
+            args,
+            vec!["mkfs.exfat", "-c", "128K", "-n", "Cinder", "/dev/sdb1"]
+        );
     }
 
     #[test]

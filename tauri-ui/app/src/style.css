@@ -315,6 +315,30 @@
   border-color: oklch(1 0 0 / 0.08);
 }
 
+/* Connection notes, under the details table. Only present when there is
+   something worth saying about the link, the transport or the free space. */
+#health {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+#health[hidden] {
+  display: none;
+}
+
+.health__note {
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 5px;
+  border-left: 2px solid color-mix(in oklch, var(--accent) 70%, transparent);
+  background: oklch(0.18 0.005 65 / 0.6);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
 /* ==========================================================================
    Details sheet
    ========================================================================== */
@@ -360,9 +384,16 @@
   color: var(--ink-2);
 }
 
+/* The table and the connection notes scroll together; separately they compete
+   for the same space and the last row disappears behind the notes. */
+#sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 #specs {
   margin: 0;
-  overflow-y: auto;
 }
 
 #specs > div {

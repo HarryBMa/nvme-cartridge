@@ -13,6 +13,7 @@
 //   parse_cartridge(drive_path)              -> CartridgeInfo (cover included)
 //   launch_game(executable, drive_path)      -> ()
 //   eject_drive(drive_path)                  -> ()
+//   cartridge_health(drive_path)             -> Health
 //
 // Wizard commands:
 //   list_games()                             -> Vec<GameInfo>  (Playnite + Steam)
@@ -20,6 +21,9 @@
 //   set_settings(settings)                   -> Settings
 //   suggest_collection_name(titles)          -> String
 //   pick_cover_image()                       -> PickedCover | null
+//   host_platform()                          -> "windows" | "linux" | …
+//   tuning_plan(drive_path, tweaks, applying) -> Vec<String>  (the commands)
+//   apply_tuning(drive_path, tweaks, applying) -> Vec<String>  (what was done)
 //   game_cover(library, id)                  -> String (data URI)
 //   list_target_drives()                     -> Vec<TargetDrive>
 //   format_plan(drive_path)                  -> FormatPlan
@@ -39,7 +43,7 @@
 // All of the real work lives in gamepak-core, which has no UI dependency and
 // so can be tested without a webview. This file is the Tauri shell around it.
 use gamepak_core::cartridge::{self, CartridgeInfo};
-use gamepak_core::{create, drives, format, settings, sgdb};
+use gamepak_core::{create, drives, format, health, settings, sgdb, tuning};
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -329,6 +333,62 @@ fn set_settings(settings: settings::Settings) -> Result<settings::Settings, Stri
     Ok(settings)
 }
 
+/// How well this cartridge is actually connected.
+///
+/// Read on demand rather than at startup: on Windows it asks PowerShell, and
+/// the launcher opening half a second slower is worse than the details sheet
+/// filling in half a second late.
+#[tauri::command]
+async fn cartridge_health(drive_path: String) -> health::Health {
+    tauri::async_runtime::spawn_blocking(move || health::inspect(&drive_path))
+        .await
+        .unwrap_or_default()
+}
+
+/// Which OS the wizard is running on, so it can offer only what exists here.
+#[tauri::command]
+fn host_platform() -> &'static str {
+    std::env::consts::OS
+}
+
+/// Which tweaks the window is asking about, by name.
+fn parse_tweaks(names: &[String]) -> Result<Vec<tuning::Tweak>, String> {
+    names
+        .iter()
+        .map(|name| match name.as_str() {
+            "defender" => Ok(tuning::Tweak::DefenderExclusion),
+            "indexing" => Ok(tuning::Tweak::SearchIndexing),
+            other => Err(format!("{other} is not a setting this tool changes")),
+        })
+        .collect()
+}
+
+/// The exact commands a tuning run would execute.
+///
+/// Shown before anything happens: this is elevated and it touches malware
+/// scanning, so the user reads the commands first.
+#[tauri::command]
+fn tuning_plan(
+    drive_path: String,
+    tweaks: Vec<String>,
+    applying: bool,
+) -> Result<Vec<String>, String> {
+    tuning::plan(&drive_path, &parse_tweaks(&tweaks)?, applying)
+}
+
+/// Apply or undo the Windows tuning. Each step elevates on its own.
+#[tauri::command]
+async fn apply_tuning(
+    drive_path: String,
+    tweaks: Vec<String>,
+    applying: bool,
+) -> Result<Vec<String>, String> {
+    let parsed = parse_tweaks(&tweaks)?;
+    tauri::async_runtime::spawn_blocking(move || tuning::apply(&drive_path, &parsed, applying))
+        .await
+        .map_err(|e| format!("the tuning thread failed: {e}"))?
+}
+
 /// A picture the user chose for a collection's artwork.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -472,6 +532,10 @@ fn main() {
             set_settings,
             suggest_collection_name,
             pick_cover_image,
+            cartridge_health,
+            host_platform,
+            tuning_plan,
+            apply_tuning,
             sgdb_search_games,
             sgdb_get_artwork,
             sgdb_download_artwork,

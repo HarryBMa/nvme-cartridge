@@ -92,9 +92,7 @@ fn cache_root() -> PathBuf {
     {
         if let Ok(local) = std::env::var("LOCALAPPDATA") {
             if !local.trim().is_empty() {
-                return PathBuf::from(local)
-                    .join("PC-GamePak")
-                    .join("sgdb-cache");
+                return PathBuf::from(local).join("PC-GamePak").join("sgdb-cache");
             }
         }
         PathBuf::from(".").join("sgdb-cache")
