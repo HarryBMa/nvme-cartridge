@@ -6,7 +6,7 @@
 <a href="https://ko-fi.com/harrybma">Support my work!</a>
 
 
-# Gamepak Cartridge
+# PC Gamepak Cartridge
 
 **Turn removable storage into physical game cartridges.**
 Plug one in and a launcher appears with the game's cover art and two buttons.
@@ -272,8 +272,8 @@ sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev libssl-dev
 ### Build and install
 
 ```bash
-git clone https://github.com/HarryBMa/gamepak-cartridge.git
-cd gamepak-cartridge
+git clone https://github.com/HarryBMa/pc-gamepak.git
+cd pc-gamepak
 cd tauri-ui && npm install && npm run build && cd ..
 ```
 
