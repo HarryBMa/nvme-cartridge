@@ -158,7 +158,7 @@
             <input id="opt-format" type="checkbox" />
             <span class="opt__body">
               <span class="opt__label">Format the drive first</span>
-              <span class="opt__hint">Erases everything on the drive. Choose btrfs or exFAT below.</span>
+              <span class="opt__hint">Erases everything on the drive. Choose exFAT or btrfs below.</span>
             </span>
           </label>
 
@@ -166,15 +166,17 @@
             <label class="field">
               <span class="field__label">Filesystem</span>
               <select id="format-filesystem">
-                <option value="btrfs">btrfs (best for NVMe cartridges)</option>
-                <option value="exfat">exFAT (best for broad removable-media compatibility)</option>
+                <option value="exfat" selected>exFAT — reads anywhere, no driver</option>
+                <option value="btrfs">btrfs — TRIM and compression, Linux only unless WinBtrfs is installed</option>
               </select>
             </label>
+            <p class="field__hint" id="filesystem-hint"></p>
             <label class="field">
               <span class="field__label">New drive name</span>
               <input id="format-label" type="text" maxlength="11" autocomplete="off"
                      spellcheck="false" />
             </label>
+            <p class="field__hint" id="label-hint"></p>
             <label class="field">
               <span class="field__label" id="confirm-label">Type the current name to confirm</span>
               <input id="format-confirm" type="text" autocomplete="off" spellcheck="false"

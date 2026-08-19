@@ -39,7 +39,7 @@ Surface tablets — in compact aluminium USB enclosures.
 |---|---|
 | **Drives** | 128 GB M.2 2230 NVMe |
 | **Enclosures** | ITGZ aluminium compact M.2 2230 case, USB 3.2 Gen 2 (10 Gbps), passive auto-cooling |
-| **Filesystem** | btrfs by default on NVMe cartridges for TRIM (discard=async) and zstd compression; exFAT is also available for broader removable-media compatibility. Windows requires [WinBtrfs](https://github.com/maharmstone/btrfs) only for btrfs. |
+| **Filesystem** | exFAT by default, so a cartridge works in whatever machine it is plugged into. btrfs is offered for people who want TRIM and compression and do not mind [WinBtrfs](https://github.com/maharmstone/btrfs) on Windows. |
 
 2230 is the right form factor for this: the drive plus enclosure is roughly the
 size of a USB stick, so a shelf of ten cartridges takes almost no room. 128 GB
@@ -257,19 +257,31 @@ system drive, you must type the drive's **current** name back exactly, and
 Write stays disabled until you have. The backend re-checks all of it — it never
 trusts the window's idea of where to write.
 
-The wizard now offers **btrfs** and **exFAT**:
+### Which filesystem
 
-- **btrfs** is the better fit for NVMe cartridges. TRIM (`discard=async`) helps
-  drive longevity, and transparent zstd compression (`compress=zstd`) can
-  stretch effective capacity on compressible game data. On Windows,
-  [WinBtrfs](https://github.com/maharmstone/btrfs) must be installed before a
-  btrfs cartridge can be read or written.
-- **exFAT** is the compatibility option. It is the better choice when the goal
-  is broad removable-media support rather than squeezing the most out of an NVMe
-  cartridge.
+**exFAT is the default, and it is the right answer for a cartridge you hand to
+someone.** Windows, Linux and macOS all read it with nothing to install, which
+is the entire point of a thing you carry between machines.
 
-On Linux the relevant mount options are set by the desktop environment or
-`/etc/fstab`.
+**btrfs is there for enthusiasts**, and it is a real choice with real costs:
+
+- It brings TRIM (`discard=async`) and transparent zstd compression
+  (`compress=zstd`).
+- Windows cannot read it at all without [WinBtrfs](https://github.com/maharmstone/btrfs),
+  a third-party kernel driver — so a btrfs cartridge only opens on machines you
+  have prepared.
+- Neither benefit is as large here as it sounds. TRIM only reaches the drive if
+  the USB bridge speaks UASP and passes UNMAP through, which many enclosures do
+  not; and game data is already compressed, so zstd typically buys single-digit
+  percentages in exchange for CPU on every read. A cartridge is also written
+  once and read for years, which is the workload flash wear cares least about.
+
+Pick btrfs if your cartridges live on Linux machines you control and you want
+the filesystem's other properties. Otherwise exFAT.
+
+The drive name follows the filesystem: exFAT allows 11 characters, btrfs has
+room for the whole title. On Linux the relevant mount options are set by the
+desktop environment or `/etc/fstab`.
 
 ## Cartridge format
 

@@ -390,13 +390,11 @@ pub fn create_cartridge(
 
     // ---- 1. Format ------------------------------------------------------
     if request.format_drive {
-        let filesystem = request
-            .format_filesystem
-            .unwrap_or(format::Filesystem::Btrfs);
+        let filesystem = request.format_filesystem.unwrap_or_default();
         let label = request
             .format_label
             .clone()
-            .unwrap_or_else(|| default_label(&title));
+            .unwrap_or_else(|| default_label_for(filesystem, &title));
         let confirmation = request.format_confirmation.clone().unwrap_or_default();
 
         progress(Progress {
@@ -977,8 +975,17 @@ fn wait_for_mount(root: &Path) {
     }
 }
 
-/// A default btrfs volume label derived from the title.
+/// A default volume name derived from the title, for the default filesystem.
 pub fn default_label(title: &str) -> String {
+    default_label_for(format::Filesystem::default(), title)
+}
+
+/// A default volume name derived from the title.
+///
+/// Kept within the chosen filesystem's own limit, which is what makes the
+/// difference visible: exFAT allows 11 characters, so *Hollow Knight* becomes
+/// *Hollow Knig*, while btrfs has room for the whole thing.
+pub fn default_label_for(filesystem: format::Filesystem, title: &str) -> String {
     let cleaned: String = title
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { ' ' })
@@ -987,7 +994,10 @@ pub fn default_label(title: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ");
 
-    let truncated: String = cleaned.chars().take(64).collect();
+    // 64 is well inside btrfs's 256 and long enough for any game's name; a
+    // volume label the width of a sentence helps nobody.
+    let limit = filesystem.label_limit().min(64);
+    let truncated: String = cleaned.chars().take(limit).collect();
     let trimmed = truncated.trim().to_string();
     if trimmed.is_empty() {
         "Cartridge".to_string()
@@ -1575,18 +1585,38 @@ mod tests {
     }
 
     #[test]
-    fn derives_a_valid_btrfs_label_from_a_title() {
-        assert_eq!(default_label("Hollow Knight"), "Hollow Knight");
+    fn derives_a_label_the_chosen_filesystem_will_accept() {
+        use format::Filesystem;
+
+        // exFAT is the default, and its 11-character limit is the tight one.
+        assert_eq!(default_label("Hollow Knight"), "Hollow Knig");
         assert_eq!(default_label("Cinder & Salt"), "Cinder Salt");
         assert_eq!(default_label("!!!"), "Cartridge");
         assert_eq!(default_label(""), "Cartridge");
-        // Whatever it produces must pass the formatter's own check.
-        for title in ["Hollow Knight", "Cinder & Salt", "!!!", "", "A"] {
-            let label = default_label(title);
-            assert!(
-                format::check_label(&label).is_ok(),
-                "{title:?} gave unusable label {label:?}"
-            );
+
+        // btrfs has room for the whole name.
+        assert_eq!(
+            default_label_for(Filesystem::Btrfs, "Hollow Knight"),
+            "Hollow Knight"
+        );
+
+        // Whatever it produces must pass the formatter's own check, for the
+        // filesystem it was derived for.
+        for filesystem in [Filesystem::Exfat, Filesystem::Btrfs] {
+            for title in [
+                "Hollow Knight",
+                "Cinder & Salt",
+                "!!!",
+                "",
+                "A",
+                &"A".repeat(300),
+            ] {
+                let label = default_label_for(filesystem, title);
+                assert!(
+                    format::check_label_for(filesystem, &label).is_ok(),
+                    "{title:?} on {filesystem:?} gave unusable label {label:?}"
+                );
+            }
         }
     }
 }

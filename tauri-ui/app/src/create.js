@@ -57,6 +57,8 @@ const el = {
   optFormat: document.getElementById("opt-format"),
   formatFields: document.getElementById("format-fields"),
   formatFilesystem: document.getElementById("format-filesystem"),
+  filesystemHint: document.getElementById("filesystem-hint"),
+  labelHint: document.getElementById("label-hint"),
   formatLabel: document.getElementById("format-label"),
   formatConfirm: document.getElementById("format-confirm"),
   formatWarning: document.getElementById("format-warning"),
@@ -106,6 +108,8 @@ let building = false;
 /** Candidates for what Play should start, when copying a non-Steam game. */
 let exeCandidates = [];
 let selectedCoverSource = null;
+/** True while the drive name is the one we derived, not one that was typed. */
+let labelIsOurs = true;
 /** What the user has switched on. Offline until they say otherwise. */
 let settings = { steamgriddbEnabled: false, steamgriddbApiKey: "" };
 /** Artwork chosen for the collection: { path, preview }. */
@@ -667,8 +671,25 @@ function refreshFormatFields() {
       : "Choose a drive first.";
   }
 
-  if (!el.formatLabel.value) {
-    el.formatLabel.value = defaultLabel(intent()?.title ?? "");
+  const filesystem = el.formatFilesystem.value;
+  el.filesystemHint.textContent =
+    filesystem === "btrfs"
+      ? "Windows cannot read btrfs without WinBtrfs installed, so this cartridge will only open on machines that have it. Choose exFAT if it is going anywhere."
+      : "Readable on Windows, Linux and macOS with nothing to install. This is what a cartridge you hand to someone should be.";
+
+  // The name field follows the filesystem: exFAT allows 11 characters, btrfs
+  // has room for the whole title.
+  const limit = filesystem === "btrfs" ? 64 : 11;
+  el.formatLabel.maxLength = limit;
+  el.labelHint.textContent = `Up to ${limit} characters on ${formatFilesystemLabel(filesystem)}.`;
+
+  if (!el.formatLabel.value || labelIsOurs) {
+    el.formatLabel.value = defaultLabel(intent()?.title ?? "", filesystem);
+    labelIsOurs = true;
+  } else if (el.formatLabel.value.length > limit) {
+    // Switching to the stricter filesystem must not leave a name it will
+    // refuse in a field the user can no longer see the end of.
+    el.formatLabel.value = el.formatLabel.value.slice(0, limit).trim();
   }
 }
 
@@ -676,15 +697,15 @@ function formatFilesystemLabel(filesystem) {
   return filesystem === "exfat" ? "exFAT" : "btrfs";
 }
 
-/** Mirrors create.rs's default_label so the field starts where it would. */
-function defaultLabel(title) {
+/** Mirrors create.rs's default_label_for so the field starts where it would. */
+function defaultLabel(title, filesystem) {
+  const limit = filesystem === "btrfs" ? 64 : 11;
   const cleaned = title
     .replace(/[^A-Za-z0-9]+/g, " ")
     .trim()
-    .slice(0, 11)
-    .trim()
-    .toUpperCase();
-  return cleaned || "CARTRIDGE";
+    .slice(0, limit)
+    .trim();
+  return cleaned || "Cartridge";
 }
 
 /* -------------------------------------------------------------- SteamGridDB */
@@ -1127,9 +1148,17 @@ el.optFormat.addEventListener("change", () => {
   refreshOptions();
   refreshCreateButton();
 });
-el.formatFilesystem.addEventListener("change", refreshCreateButton);
+el.formatFilesystem.addEventListener("change", () => {
+  refreshFormatFields();
+  refreshCreateButton();
+});
+
 el.formatConfirm.addEventListener("input", refreshCreateButton);
-el.formatLabel.addEventListener("input", refreshCreateButton);
+el.formatLabel.addEventListener("input", () => {
+  // Once it has been typed in, changing the filesystem must not overwrite it.
+  labelIsOurs = false;
+  refreshCreateButton();
+});
 el.create.addEventListener("click", writeCartridge);
 el.rescan.addEventListener("click", async () => {
   status("Rescanning…");
@@ -1291,7 +1320,7 @@ async function demoInvoke(command, args) {
         autorunWritten: true,
         icon: null,
         formatted: args.request.formatDrive,
-        formattedFilesystem: args.request.formatFilesystem || "btrfs",
+        formattedFilesystem: args.request.formatFilesystem || "exfat",
         gameCopied: args.request.copyGame,
         bytesCopied: args.request.copyGame ? 9_106_886_656 : 0,
         registeredWithSteam: args.request.copyGame && Boolean(args.request.appId),

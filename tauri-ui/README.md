@@ -100,11 +100,13 @@ partial install cannot play.
 Covers are loaded one at a time as you select a game: base64ing a whole library
 into the webview at once would be tens of megabytes of IPC.
 
-The wizard can also format the cartridge to **btrfs** or **exFAT**, copy a
+The wizard can also format the cartridge to **exFAT** or **btrfs**, copy a
 Steam game onto it and register it in Steam's `libraryfolders.vdf`, and write an
 `autorun.inf` so Explorer shows the game's name instead of "Removable Disk".
-Formatting is opt-in and gated on typing the drive's current name back. btrfs is
-the NVMe-first option; exFAT is there for broader removable-media compatibility.
+Formatting is opt-in and gated on typing the drive's current name back. exFAT is
+the default, because it reads on any machine with no driver to install; btrfs is
+there for enthusiasts who want TRIM and compression and can live with needing
+WinBtrfs on Windows.
 
 ## Icon
 
@@ -212,7 +214,7 @@ core/src/
 ├── steam.rs       Steam manifests and library folders
 ├── steamlib.rs    copy a game, register/unregister with Steam
 ├── drives.rs      which drives may be written to
-├── format.rs      btrfs / exFAT formatting, behind confirmation
+├── format.rs      exFAT / btrfs formatting, behind confirmation
 ├── autorun.rs     autorun.inf, drive name and icon
 └── create.rs      the build pipeline
 ```
