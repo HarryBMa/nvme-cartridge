@@ -6,9 +6,9 @@
 <a href="https://ko-fi.com/harrybma">Support my work!</a>
 
 
-# NVMe Game Cartridges
+# Gamepak Cartridge
 
-**Turn M.2 2230 NVMe drives into physical game cartridges.**
+**Turn removable storage into physical game cartridges.**
 Plug one in and a launcher appears with the game's cover art and two buttons.
 
 <img width="420" alt="The cartridge launcher: cover art filling the window, the game title, and Play and Eject buttons" src="docs/launcher.png" />
@@ -272,8 +272,8 @@ sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev libssl-dev
 ### Build and install
 
 ```bash
-git clone https://github.com/HarryBMa/nvme-cartridge.git
-cd nvme-cartridge
+git clone https://github.com/HarryBMa/gamepak-cartridge.git
+cd gamepak-cartridge
 cd tauri-ui && npm install && npm run build && cd ..
 ```
 
