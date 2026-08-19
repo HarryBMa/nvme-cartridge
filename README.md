@@ -569,7 +569,7 @@ units on Linux, or the logon task and install folder on Windows.
 ## Thanks
 
 This project began as a fork of
-**[LewdM3at/PC-GamePak](https://github.com/LewdM3at/PC-GamePak)**,
+**[LewdM3at/PC-cartridge-system](https://github.com/LewdM3at/PC-cartridge-system)**,
 which had the original idea and the first working implementation: the udev rule,
 the systemd template unit and the Windows monitor that make insert-detection work
 at all. The shape of the Linux side is still recognisably theirs.
