@@ -1,0 +1,38 @@
+# The rootless install: a systemd *user* service, started at login.
+#
+# The system install does not use this. There, udev starts the launcher through
+# pc-gamepak@.service and nothing is resident. This is for installs that cannot
+# write a udev rule — a Flatpak, or anyone who would rather not give a game
+# launcher root — and it costs one small process instead.
+#
+#   systemctl --user enable --now pc-gamepak-watcher.service
+
+[Unit]
+Description=PC GamePak cartridge watcher
+Documentation=https://github.com/HarryBMa/pc-gamepak
+# Wait for the desktop: the launcher needs a session to put a window on.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/pc-gamepak-watcher
+# It blocks in poll() and does nothing else, so a crash loop would be a bug
+# worth noticing rather than papering over — but a failed restart should not
+# leave the user with no watcher until the next login.
+Restart=on-failure
+RestartSec=5
+
+# It reads the mount table and starts one program. Nothing else is needed.
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+MemoryMax=64M
+
+[Install]
+# default.target rather than graphical-session.target: the latter is only
+# reached on desktops with systemd session integration, and a bare window
+# manager would leave the watcher permanently disabled with no clue why.
+WantedBy=default.target

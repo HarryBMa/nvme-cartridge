@@ -46,30 +46,28 @@ switch.
 
 | Channel | Why not |
 |---|---|
-| **Flatpak / Flathub** | The sandbox cannot install a udev rule or a system unit, and `flatpak-spawn --host` will not save you: writing to `/etc` is exactly what the sandbox exists to prevent. A Flatpak build would install a launcher that never launches. |
-| **Snap** | Closer — snapd can ship daemons and has device interfaces — but it needs classic confinement for what this does, and classic confinement means a manual review queue for a project no reviewer has heard of. Reconsider if the rootless watcher below happens. |
+| **Flatpak / Flathub** | **Now plausible, and untested.** The blocker was the udev rule; the rootless watcher removes it. What is unverified is whether host mounts propagate into the sandbox promptly — bubblewrap makes the sandbox's mounts slave to the host's, so they should, but that needs checking on a real machine before a manifest is worth writing. The launcher also has to be able to start a game on the host, which means `--talk-name=org.freedesktop.Flatpak` or accepting that `steam://` goes through the portal. |
+| **Snap** | Same unlock, same caveat, plus classic confinement's manual review queue. Behind Flatpak in the order. |
 | **Homebrew** | macOS is not a supported platform at all: no watcher, no installer, no icon set. On Linux, Homebrew installs into its own prefix and cannot place system units either. A tap would ship something that cannot work on the platform people would `brew install` it from. |
 | **Native pacman repo** | Hosting a signed binary repository to serve what the AUR already serves from source. |
 
-## The thing that would change these answers
+## What changed these answers
 
-Every "no" above traces back to the same root: the Linux side needs root to
-install a udev rule.
+Every "no" above used to trace back to one root: the Linux side needed root to
+install a udev rule. It no longer does.
 
-It does not have to. A small daemon can subscribe to the kernel's uevent netlink
-socket directly and see the same partition-arrival events udev sees, with no
-rule file, no root, and no system unit — a **systemd user service** started at
-login. That is roughly what the Windows watcher already does with
-`WM_DEVICECHANGE`.
+`linux/install-user.sh` installs everything under `$HOME` and runs the watcher as
+a **systemd user service**. The watcher blocks in `poll()` on
+`/proc/self/mountinfo` — not on udev, which a sandbox cannot reach — and wakes
+when the mount table changes. About 2 MB resident, no CPU while it waits.
 
-The cost is real and it is the thing this project has been careful about: Linux
-would go from *nothing resident* to one process resident, on the order of the
-2 MB the Windows watcher uses. In exchange, `flatpak install`, `snap install`
-and `brew install` all become honest, and the Linux install stops needing a
-password.
+The system install stays the recommendation, because zero is a better number than
+two megabytes. But the rootless one is what a package format can actually
+install, which is what puts Flatpak back on the table.
 
-That is a product decision, not a packaging one, and it should be made
-deliberately rather than because a package format asked for it.
+Still unverified, and worth checking before writing a manifest: whether new host
+mounts appear inside a Flatpak sandbox quickly enough to be useful, and how the
+launcher hands a `steam://` URI back to the host.
 
 ## Order of work
 
@@ -84,7 +82,9 @@ deliberately rather than because a package format asked for it.
 4. **WinGet**, via `wingetcreate` for the first submission and the
    `winget-releaser` action thereafter.
 5. **`.deb`** attached to releases via `cargo-deb`.
-6. Revisit Flatpak and Snap **only** if the rootless watcher lands.
+6. **Flatpak**, once someone has confirmed on real hardware that mount events
+   reach a sandboxed watcher and that `steam://` still launches from inside one.
+   Snap after that, if ever.
 
 ## Before the first tag
 

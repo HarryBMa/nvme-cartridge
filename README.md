@@ -114,7 +114,7 @@ while it waits.
 
 | | Idle |
 |---|---|
-| **Linux** | **Nothing resident.** udev is already part of the OS; the rule adds no process. |
+| **Linux** | **Nothing resident** with the system install: udev is already part of the OS, and the rule adds no process. The rootless install trades that for one process of about 2 MB, blocked in `poll()` on the mount table. |
 | **Windows** | **One process, ~2 MB, 0% CPU.** `pc-gamepak-watcher.exe` blocks on the Windows message queue — no polling, no timer. |
 
 The launcher is a webview, so it is not small *while it is on screen* — expect
@@ -436,14 +436,39 @@ cd pc-gamepak
 cd tauri-ui && npm install && npm run build && cd ..
 ```
 
-**Linux**
+**Linux** — two shapes, and the menu asks which:
 
 ```bash
-./gamepak-linux.sh          # → 1) Install
+./gamepak-linux.sh          # → 1) Install            (recommended)
+                            # → 2) Install without root
 ```
 
-Installs the udev rule, the systemd template unit, the mount helper and the
-launcher binary.
+**1 — the system install.** A udev rule, two systemd template units, the helpers
+and the launcher. udev is already running as part of the OS, so **nothing is
+resident**: no process of ours exists until a cartridge is plugged in. Needs your
+password once.
+
+**2 — the rootless install.** Everything under `~/.local/bin`, plus a systemd
+*user* service. No password, no udev rule, nothing written outside your home. In
+exchange a small watcher stays running — about **2 MB, blocked in `poll()` on the
+mount table**, no CPU while it waits.
+
+Pick 1 unless you have a reason: zero is a better number than two megabytes. Pick
+2 if you would rather not give a game launcher root, if you are on a machine
+where you do not have it, or if you are installing from a sandboxed package,
+which cannot write a udev rule at all.
+
+They are not two codebases — the same launcher, the same detection rules, a
+different trigger. The rootless one is arguably the more accurate of the two: it
+wakes when the cartridge is *mounted and readable*, where udev fires when the
+kernel first sees the partition and the helper then waits up to a minute for the
+desktop to catch up.
+
+```bash
+# What the rootless install did, if you want to look:
+systemctl --user status pc-gamepak-watcher.service
+tail ~/.local/state/pc-gamepak/watcher.log
+```
 
 **Windows**
 

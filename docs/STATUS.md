@@ -42,11 +42,16 @@ connection health. Nothing on a cartridge runs without a click.
 choose what goes on it, Write. Formatting, copying, collections, artwork by file
 picker or SteamGridDB, per-cartridge Windows tuning.
 
-### `watcher/` — Windows only, 4 tests
+### `watcher/` — both platforms, 13 tests
 
-A hidden top-level window blocking on `WM_DEVICECHANGE`. No polling, no timer,
-about 2 MB resident. On Linux this binary is a stub that tells you to install the
-udev rule instead.
+**Windows:** a hidden top-level window blocking on `WM_DEVICECHANGE`. No polling,
+no timer, about 2 MB resident.
+
+**Linux:** blocks in `poll()` on `/proc/self/mountinfo`, which the kernel wakes on
+any mount activity. Used only by the rootless install — the system install has
+udev do this and keeps nothing resident. Deliberately does not link
+`gamepak-core`: core pulls serde and ureq, which is fine for a launcher that runs
+for ten seconds and not for a process that is resident all session.
 
 ### `linux/`, `windows/` — installers
 
@@ -69,48 +74,32 @@ Ranked by how much it matters.
 2. **Nobody has run this on real hardware.** Every path is unit-tested and the
    frontend is screenshotted, but no cartridge has been written by this code on a
    real drive. That is the next real milestone, not a feature.
-3. **The rootless Linux install** (see below), which is also what makes Flatpak
-   possible.
-4. **Version numbers.** Three crates all saying `0.1.0`, moved by hand.
-5. **A cartridge cannot be edited.** Changing a title or swapping the art means
+3. **Version numbers.** Three crates all saying `0.1.0`, moved by hand.
+4. **A cartridge cannot be edited.** Changing a title or swapping the art means
    writing the whole cartridge again, or editing `cartridge.conf` by hand.
-6. **No integrity check.** Nothing verifies that a copied game arrived intact.
+5. **No integrity check.** Nothing verifies that a copied game arrived intact.
    For 60 GB over USB that is worth having.
-7. **Windows code signing.** Unsigned means SmartScreen on every download.
-8. **macOS** is not supported at all — no watcher, no installer, no icons.
+6. **Windows code signing.** Unsigned means SmartScreen on every download.
+7. **macOS** is not supported at all — no watcher, no installer, no icons.
 
 ## The rootless Linux install
 
-Today's Linux install needs root once, to place a udev rule and two systemd
-units. In exchange nothing is resident: udev is already running, and the rule
-adds no process.
-
-The alternative is a small user-level watcher — the shape Flatpak, Snap and
-Homebrew would all need. The obvious implementation, subscribing to udev, is the
-wrong one: a sandbox has no `/run/udev`, and udev's netlink group is not
-something a confined app should count on.
-
-**Watching the mount table is better, and not just for the sandbox.** `poll()`
-on `/proc/self/mountinfo` blocks until the mount table changes, costs nothing
-while it waits, and fires exactly when a cartridge becomes *readable* — which is
-the moment that matters. The current udev path fires when the kernel sees the
-partition and then spends up to sixty seconds polling `findmnt`, waiting for the
-automounter to catch up. The mount watcher has no such gap.
-
-So the plan is two shapes of the same thing:
+Built. `linux/install-user.sh` puts everything under `$HOME` and runs the watcher
+as a systemd user service; `linux/uninstall-user.sh` takes it back out. The menu
+in `gamepak-linux.sh` offers both.
 
 | Install | Trigger | Resident | Needs root |
 |---|---|---|---|
 | **System** (AUR, `.deb`, `install.sh`) | udev rule | nothing | yes, once |
-| **Rootless** (Flatpak, or `--user`) | mount-table watcher, systemd user service | one process, ~2 MB | no |
+| **Rootless** (`install-user.sh`, and what a Flatpak would use) | mount-table watcher, systemd user service | one process, ~2 MB | no |
 
-Both run the same launcher and the same detection logic; only the trigger
-differs. The system install stays the recommendation, because zero is a better
-number than two megabytes, and the rootless one exists for people who would
-rather not give a game launcher root — or who are installing from Flathub.
+Both run the same launcher and the same detection rules; only the trigger
+differs. The rootless one is arguably more accurate: it wakes when the cartridge
+is mounted and readable, where udev fires when the kernel first sees the
+partition and its helper then polls `findmnt` for up to sixty seconds waiting for
+the desktop to catch up.
 
-Unverified until it runs on real hardware: whether host mounts propagate into the
-Flatpak sandbox promptly enough to be useful. bubblewrap makes the sandbox's
-mounts slave to the host's, so they should — but "should" is not "does", and this
-is exactly the kind of thing that is fine on one distribution and broken on
-another.
+Verified on Linux with a loop-mounted image: insert opens the launcher, eject
+closes that launcher and leaves any other cartridge's window alone, and a
+re-insert after a genuine eject opens a new one rather than being debounced away.
+Not yet verified on real removable hardware, or inside a Flatpak sandbox.

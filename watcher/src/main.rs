@@ -1,30 +1,34 @@
-//! Cartridge watcher (Windows).
+//! Cartridge watcher.
 //!
 //! Replaces the resident PowerShell monitor. PowerShell holds the whole .NET
 //! runtime and a WMI subscription open for the entire login session, which costs
 //! tens of megabytes to do nothing. This does the same job by blocking on the
 //! Windows message queue: no polling, no timer, no CPU while idle.
 //!
-//! On Linux none of this is needed — udev is already running as part of the OS
-//! and starts the launcher through a systemd unit, so there is no resident
-//! process at all. See `linux/99-pc-gamepak.rules`.
+//! On Linux the system install does not need this at all — udev is already
+//! running as part of the OS and starts the launcher through a systemd unit, so
+//! nothing is resident. See `linux/99-pc-gamepak.rules`.
+//!
+//! The Linux arm here is for the other shape of install: no root, no udev rule,
+//! a systemd *user* service. It blocks in poll() on the mount table instead,
+//! which is what a sandboxed package can do — and, as it happens, fires when the
+//! cartridge is actually readable rather than when the kernel first sees the
+//! partition. See `linux.rs`.
 //!
 //! Flow: volume arrives -> is there a cartridge.conf on it? -> start the
 //! launcher with `--drive X:\` and go back to sleep.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-// Only the Windows arm logs; on other targets the module is compiled but unused.
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg(not(windows))]
+mod linux;
 mod log;
+#[cfg(not(windows))]
+mod mounts;
 
 #[cfg(not(windows))]
 fn main() {
-    eprintln!(
-        "pc-gamepak-watcher is only needed on Windows.\n\
-         On Linux, install the udev rule instead: sudo ./linux/install.sh"
-    );
-    std::process::exit(1);
+    linux::run()
 }
 
 #[cfg(windows)]

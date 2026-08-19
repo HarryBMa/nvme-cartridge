@@ -48,6 +48,9 @@ jobs:
           staging="pc-gamepak-${version}-linux-x86_64"
           mkdir -p "$staging"
           cp tauri-ui/src-tauri/target/release/pc-gamepak "$staging/"
+          # The rootless install needs the watcher; the system install ignores it.
+          cargo build --release --manifest-path watcher/Cargo.toml
+          cp watcher/target/release/pc-gamepak-watcher "$staging/"
           cp -r linux "$staging/"
           cp gamepak-linux.sh cartridge.conf.example README.md LICENSE "$staging/" 2>/dev/null || true
           tar -czf "${staging}.tar.gz" "$staging"
