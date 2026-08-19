@@ -1,0 +1,37 @@
+{
+    "version": "0.1.0",
+    "description": "Turn removable storage into physical game cartridges",
+    "homepage": "https://github.com/HarryBMa/pc-gamepak",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/HarryBMa/pc-gamepak/releases/download/v0.1.0/pc-gamepak-0.1.0-windows-x86_64.zip",
+            "hash": "0000000000000000000000000000000000000000000000000000000000000000",
+            "extract_dir": "pc-gamepak-0.1.0-windows-x86_64"
+        }
+    },
+    "bin": [
+        "pc-gamepak.exe",
+        "pc-gamepak-watcher.exe"
+    ],
+    "notes": [
+        "The watcher is what opens a launcher when a cartridge is plugged in.",
+        "To have it start at logon, run the installer once from the extracted",
+        "folder:  powershell -ExecutionPolicy Bypass -File windows\\install.ps1",
+        "The wizard runs on its own without any of that:  pc-gamepak --create"
+    ],
+    "checkver": {
+        "github": "https://github.com/HarryBMa/pc-gamepak"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/HarryBMa/pc-gamepak/releases/download/v$version/pc-gamepak-$version-windows-x86_64.zip",
+                "extract_dir": "pc-gamepak-$version-windows-x86_64"
+            }
+        },
+        "hash": {
+            "url": "$url.sha256"
+        }
+    }
+}

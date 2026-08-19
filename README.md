@@ -527,6 +527,15 @@ When a cartridge does not open the launcher, the logs are the first place to
 look: `%LOCALAPPDATA%\PC-GamePak\watcher.log` on Windows,
 `~/.local/state/pc-gamepak/helper.log` on Linux.
 
+## Installing from a package manager
+
+Nothing is published yet. When it is, the shortlist is the AUR (which is where
+the Steam Deck and Arch audience is), WinGet and Scoop on Windows — the channels
+that can actually install the udev rule or the logon task this depends on.
+
+[`docs/PUBLISHING.md`](docs/PUBLISHING.md) has the reasoning, including why
+Flatpak, Snap and Homebrew are not on that list yet and what would change it.
+
 ## Uninstall
 
 Run the installer menu and choose Uninstall. It removes the udev rule and systemd
