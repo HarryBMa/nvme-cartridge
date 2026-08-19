@@ -17,115 +17,78 @@ Plug one in and a launcher appears with the game's cover art and two buttons.
 
 ---
 
-## The idea
+A cartridge is a small drive in a pocketable enclosure with a game on it. Push it
+into a USB-C port; the launcher opens showing what's on it. Press **Play** to
+start the game, or **Eject** to power the drive down and pull it out.
 
-A cartridge is a small drive in a pocketable enclosure with a game on it — an
-M.2 2230 NVMe stick in the build documented here, though nothing in the software
-requires that. Push it into a USB-C port; the launcher opens showing what's on
-it. Press **Play** to start the game, or **Eject** to power the drive down and
-pull it out.
+Each cartridge is just a drive with a `cartridge.conf` text file at its root.
+There are no scripts to write and nothing to allowlist, because **nothing on a
+cartridge is ever executed automatically** — pressing Play is the gate.
+
+```bash
+git clone https://github.com/HarryBMa/pc-gamepak.git
+cd pc-gamepak
+cd tauri-ui && npm install && npm run build && cd ..
+
+./gamepak-linux.sh          # Linux  → 1) Install
+# Windows: right-click gamepak-windows.ps1 → Run with PowerShell → 1) Install
+```
+
+Then plug a drive in, or run `pc-gamepak --create` to make one.
+
+## Contents
+
+**Using it**
+&nbsp;&nbsp;[The idea](#the-idea) ·
+[The launcher](#the-launcher) ·
+[Making a cartridge](#making-a-cartridge) ·
+[Getting the most out of a cartridge](#performance)
+
+**Building one**
+&nbsp;&nbsp;[Hardware](#hardware) ·
+[Cartridge format](#cartridge-format) ·
+[Setup and install](#setup) ·
+[Uninstall](#uninstall)
+
+**Under it**
+&nbsp;&nbsp;[How it works](#how-it-works) ·
+[Security](#security) ·
+[Working on it](#working-on-it) ·
+[Packages](#packages)
+
+**Everything else**
+&nbsp;&nbsp;[Thanks](#thanks) ·
+[Licence](#licence) ·
+[Disclaimer](#disclaimer)
+
+Click any heading below to open it.
+
+---
+
+<a id="the-idea"></a>
+<details open>
+<summary><b>The idea</b> — what a cartridge is, and why</summary>
+<br />
 
 It's the console-cartridge feeling, using hardware that already exists — and it
 genuinely offloads a game off your internal disk, which is the practical half of
 the appeal.
 
-Each cartridge is just a drive with a `cartridge.conf` text file at its root.
-There are no scripts to write and nothing to allowlist.
+A shelf of cartridges is a library you can hold. Each one carries a game, its
+cover art and nothing else, so what is on it is obvious from across the room and
+from the drive's own name in Explorer.
 
-## Hardware
+The build documented here uses an **M.2 2230 NVMe** stick in a USB enclosure, but
+nothing in the software requires that: any removable drive your OS automounts
+will do — a SATA SSD in a dock, an SD card, a USB stick, an external HDD. The
+form factor is a comfort choice, not a technical one.
 
-Built around **M.2 2230 NVMe drives** — the short ones from Steam Decks and
-Surface tablets — in compact aluminium USB enclosures.
+</details>
 
-| | |
-|---|---|
-| **Drives** | 128 GB M.2 2230 NVMe |
-| **Enclosures** | ITGZ aluminium compact M.2 2230 case, USB 3.2 Gen 2 (10 Gbps), passive auto-cooling |
-| **Filesystem** | exFAT by default, so a cartridge works in whatever machine it is plugged into. btrfs is offered for people who want TRIM and compression and do not mind [WinBtrfs](https://github.com/maharmstone/btrfs) on Windows. |
-
-2230 is the right form factor for this: the drive plus enclosure is roughly the
-size of a USB stick, so a shelf of ten cartridges takes almost no room. 128 GB
-holds most single games, and the whole point of a cartridge is that it carries
-one thing.
-
-The enclosure is doing two jobs. It makes the cartridge pocketable, and it keeps
-the wear away from the NVMe stick itself. A bare M.2 NVMe edge connector is
-typically only rated for roughly **50–100 insertion cycles**; used as a raw
-plug-in cartridge, the drive would become the sacrificial part. In a USB
-enclosure, the NVMe drive is installed once and left alone, while the repeated
-insertions happen on the cheaper, easier-to-replace USB side instead.
-
-That trade-off does **not** mean giving up useful speed. 10 Gbps over USB 3.2
-Gen 2 is around 1 GB/s in practice — already ahead of what a 2.5" SATA SSD can
-deliver, and far beyond Switch-cartridge or SD-card territory. The aluminium
-body doubles as the heatsink, which matters when a game is streaming assets off
-it for hours.
-
-| Medium | Practical read speed | What runs comfortably | Notes |
-|---|---:|---|---|
-| **USB 3.2 Gen 2 enclosure + 2230 NVMe** | **~800–1000 MB/s** | Indies, emulators, AA games, older AAA games, and many modern installs | The USB link is not the bottleneck here; drive quality and thermals usually matter more |
-| **2.5" SATA SSD** | ~500–550 MB/s | Most PC games, including many large installs | Still slower than a 10 Gbps USB NVMe enclosure |
-| **Nintendo Switch game card** | ~50–100 MB/s | Games built and optimised around console-style asset budgets | Much slower, but the software is designed for it |
-| **UHS-I SD / microSD** | ~30–90 MB/s | Retro libraries, indies, lightweight PC games, emulators | Fine for small assets; weak for large modern PC installs |
-
-So the practical answer is: the **adapter is the durability win**, and USB 3.2
-is still fast enough that the cartridge remains a real play-from-media device
-rather than just cold storage.
-
-For this build, cheap refurbished bulk 2230 drives are a value play, not a
-promise of flagship performance. They should be perfectly usable for indies,
-retro, emulation, smaller AA releases and plenty of older AAA games, but the
-newest asset-streaming-heavy PC blockbusters may still be happier on a strong
-internal NVMe if a bargain cartridge drive cannot keep up.
-
-Nothing here is specific to NVMe or to 2230. Any removable storage your OS will
-automount works: 2.5" SATA SSDs in a dock, SD cards, USB sticks, external HDDs.
-The form factor is a comfort choice, not a technical one.
-
-> **Photos of the physical cartridges are not in the repository yet.** Drop them
-> in `docs/` and link them here — the screenshots below are the software.
-
-## How it works
-
-```
-drive plugged in
-      │
-      ├─ Linux    udev rule ──▶ systemd unit ──▶ helper waits for the mount
-      └─ Windows  watcher (resident, ~2 MB) sees the volume arrive
-      │
-      ▼
-is there a cartridge.conf at the root?   ──no──▶  nothing happens
-      │ yes
-      ▼
-launcher opens with the cover art
-      │
-      ├─ Play   ──▶ starts what cartridge.conf names, then closes
-      └─ Eject  ──▶ flushes, unmounts, powers the drive down
-```
-
-**Nothing on a cartridge is executed automatically.** The launcher shows you what
-it found and waits — pressing Play is the gate. That is the whole security model,
-and it is why there is no trust list or allowlist to maintain.
-
-### Idle cost
-
-The point of a thing that waits all day for a drive is that it costs nothing
-while it waits.
-
-| | Idle |
-|---|---|
-| **Linux** | **Nothing resident** with the system install: udev is already part of the OS, and the rule adds no process. The rootless install trades that for one process of about 2 MB, blocked in `poll()` on the mount table. |
-| **Windows** | **One process, ~2 MB, 0% CPU.** `pc-gamepak-watcher.exe` blocks on the Windows message queue — no polling, no timer. |
-
-The launcher is a webview, so it is not small *while it is on screen* — expect
-around 100 MB for the few seconds it is up, then it exits and gives all of it
-back. There is no tray icon and no background service for the UI.
-
-The watcher ignores a second arrival on the same drive letter within 4 seconds,
-so a cartridge that is ejected and immediately re-inserted may require a brief
-pause before the launcher reopens.
-
-## The launcher
+<a id="the-launcher"></a>
+<details>
+<summary><b>The launcher</b> — one window, cover art, Play and Eject</summary>
+<br />
 
 The window is 420 × 560 — the 3:4 of a cover — and the artwork fills it. Only
 three things sit on top: what the cartridge is, Play, and Eject.
@@ -156,7 +119,12 @@ keys. A cartridge with one game on it still gets the plain Play and Eject pair.
 | `I` | Details |
 | `Esc` | Close details, or dismiss |
 
-## Making a cartridge
+</details>
+
+<a id="making-a-cartridge"></a>
+<details>
+<summary><b>Making a cartridge</b> — the wizard: pick a game, pick a drive, Write</summary>
+<br />
 
 Run the installer menu and choose **Create a cartridge**, or start it directly:
 
@@ -230,6 +198,8 @@ Steam-sourced cover usually leaves the default icon in place.
 **Games in no library at all** can be entered by hand with any supported URI or a
 path on the cartridge.
 
+<a id="artwork-from-steamgriddb"></a>
+
 ### Artwork from SteamGridDB
 
 Some games have no cached art at all — anything added to Playnite by hand,
@@ -285,7 +255,12 @@ The drive name follows the filesystem: exFAT allows 11 characters, btrfs has
 room for the whole title. On Linux the relevant mount options are set by the
 desktop environment or `/etc/fstab`.
 
-## Getting the most out of a cartridge
+</details>
+
+<a id="performance"></a>
+<details>
+<summary><b>Getting the most out of a cartridge</b> — what actually causes stutter, in order</summary>
+<br />
 
 A game running from a cartridge is running over USB, and USB is the slowest
 part of the machine. Most of what people blame on that is not actually the
@@ -380,7 +355,70 @@ stays contiguous, and churning installs on and off it does not. Format, copy,
 play. Sustained writes also heat the enclosure — that affects how long the copy
 takes, not how the game runs.
 
-## Cartridge format
+</details>
+
+<a id="hardware"></a>
+<details>
+<summary><b>Hardware</b> — 2230 NVMe, enclosures, and how fast that really is</summary>
+<br />
+
+Built around **M.2 2230 NVMe drives** — the short ones from Steam Decks and
+Surface tablets — in compact aluminium USB enclosures.
+
+| | |
+|---|---|
+| **Drives** | 128 GB M.2 2230 NVMe |
+| **Enclosures** | ITGZ aluminium compact M.2 2230 case, USB 3.2 Gen 2 (10 Gbps), passive auto-cooling |
+| **Filesystem** | exFAT by default, so a cartridge works in whatever machine it is plugged into. btrfs is offered for people who want TRIM and compression and do not mind [WinBtrfs](https://github.com/maharmstone/btrfs) on Windows. |
+
+2230 is the right form factor for this: the drive plus enclosure is roughly the
+size of a USB stick, so a shelf of ten cartridges takes almost no room. 128 GB
+holds most single games, and the whole point of a cartridge is that it carries
+one thing.
+
+The enclosure is doing two jobs. It makes the cartridge pocketable, and it keeps
+the wear away from the NVMe stick itself. A bare M.2 NVMe edge connector is
+typically only rated for roughly **50–100 insertion cycles**; used as a raw
+plug-in cartridge, the drive would become the sacrificial part. In a USB
+enclosure, the NVMe drive is installed once and left alone, while the repeated
+insertions happen on the cheaper, easier-to-replace USB side instead.
+
+That trade-off does **not** mean giving up useful speed. 10 Gbps over USB 3.2
+Gen 2 is around 1 GB/s in practice — already ahead of what a 2.5" SATA SSD can
+deliver, and far beyond Switch-cartridge or SD-card territory. The aluminium
+body doubles as the heatsink, which matters when a game is streaming assets off
+it for hours.
+
+| Medium | Practical read speed | What runs comfortably | Notes |
+|---|---:|---|---|
+| **USB 3.2 Gen 2 enclosure + 2230 NVMe** | **~800–1000 MB/s** | Indies, emulators, AA games, older AAA games, and many modern installs | The USB link is not the bottleneck here; drive quality and thermals usually matter more |
+| **2.5" SATA SSD** | ~500–550 MB/s | Most PC games, including many large installs | Still slower than a 10 Gbps USB NVMe enclosure |
+| **Nintendo Switch game card** | ~50–100 MB/s | Games built and optimised around console-style asset budgets | Much slower, but the software is designed for it |
+| **UHS-I SD / microSD** | ~30–90 MB/s | Retro libraries, indies, lightweight PC games, emulators | Fine for small assets; weak for large modern PC installs |
+
+So the practical answer is: the **adapter is the durability win**, and USB 3.2
+is still fast enough that the cartridge remains a real play-from-media device
+rather than just cold storage.
+
+For this build, cheap refurbished bulk 2230 drives are a value play, not a
+promise of flagship performance. They should be perfectly usable for indies,
+retro, emulation, smaller AA releases and plenty of older AAA games, but the
+newest asset-streaming-heavy PC blockbusters may still be happier on a strong
+internal NVMe if a bargain cartridge drive cannot keep up.
+
+Nothing here is specific to NVMe or to 2230. Any removable storage your OS will
+automount works: 2.5" SATA SSDs in a dock, SD cards, USB sticks, external HDDs.
+The form factor is a comfort choice, not a technical one.
+
+> **Photos of the physical cartridges are not in the repository yet.** Drop them
+> in `docs/` and link them here — the screenshots below are the software.
+
+</details>
+
+<a id="cartridge-format"></a>
+<details>
+<summary><b>Cartridge format</b> — the one file a cartridge needs, by hand</summary>
+<br />
 
 A cartridge is a text file and some art, so you can make one by hand. Copy
 `cartridge.conf.example` to the root of the drive as `cartridge.conf`:
@@ -415,7 +453,12 @@ and `shellexecute=` keys are deliberately ignored: Windows has ignored them on
 non-optical media since Windows 7, and they are the oldest autorun malware vector
 there is.
 
-## Setup
+</details>
+
+<a id="setup"></a>
+<details>
+<summary><b>Setup and install</b> — prerequisites, and the two shapes of Linux install</summary>
+<br />
 
 ### Prerequisites
 
@@ -484,7 +527,67 @@ registers a logon task.
 no installer and no icon set for it, so rather than ship something half-working
 the macOS branches were removed.
 
-## Security
+</details>
+
+<a id="uninstall"></a>
+<details>
+<summary><b>Uninstall</b> — putting the machine back</summary>
+<br />
+
+Run the installer menu and choose Uninstall. It removes the udev rule and systemd
+units on Linux, or the logon task and install folder on Windows.
+
+</details>
+
+<a id="how-it-works"></a>
+<details>
+<summary><b>How it works</b> — insertion to launcher, and what it costs while idle</summary>
+<br />
+
+```
+drive plugged in
+      │
+      ├─ Linux    udev rule ──▶ systemd unit ──▶ helper waits for the mount
+      └─ Windows  watcher (resident, ~2 MB) sees the volume arrive
+      │
+      ▼
+is there a cartridge.conf at the root?   ──no──▶  nothing happens
+      │ yes
+      ▼
+launcher opens with the cover art
+      │
+      ├─ Play   ──▶ starts what cartridge.conf names, then closes
+      └─ Eject  ──▶ flushes, unmounts, powers the drive down
+```
+
+**Nothing on a cartridge is executed automatically.** The launcher shows you what
+it found and waits — pressing Play is the gate. That is the whole security model,
+and it is why there is no trust list or allowlist to maintain.
+
+### Idle cost
+
+The point of a thing that waits all day for a drive is that it costs nothing
+while it waits.
+
+| | Idle |
+|---|---|
+| **Linux** | **Nothing resident** with the system install: udev is already part of the OS, and the rule adds no process. The rootless install trades that for one process of about 2 MB, blocked in `poll()` on the mount table. |
+| **Windows** | **One process, ~2 MB, 0% CPU.** `pc-gamepak-watcher.exe` blocks on the Windows message queue — no polling, no timer. |
+
+The launcher is a webview, so it is not small *while it is on screen* — expect
+around 100 MB for the few seconds it is up, then it exits and gives all of it
+back. There is no tray icon and no background service for the UI.
+
+The watcher ignores a second arrival on the same drive letter within 4 seconds,
+so a cartridge that is ejected and immediately re-inserted may require a brief
+pause before the launcher reopens.
+
+</details>
+
+<a id="security"></a>
+<details>
+<summary><b>Security</b> — nothing runs without a click</summary>
+<br />
 
 Nothing on a cartridge runs without a click. That is the model. Earlier versions
 of this idea auto-executed a `launch.sh` on insert, which needed a SHA-256
@@ -518,7 +621,12 @@ the normal state rather than stale cruft. When you reformat or repurpose one, th
 wizard offers **Remove this drive from Steam's library list**. Steam must be
 closed.
 
-## Working on it
+</details>
+
+<a id="working-on-it"></a>
+<details>
+<summary><b>Working on it</b> — the crate split, the tests, the layout</summary>
+<br />
 
 The logic lives in `core/` (crate `gamepak-core`), deliberately free of any UI
 dependency, so the tests run anywhere:
@@ -537,22 +645,34 @@ verifies every element the scripts reach for exists in the HTML — the UI ships
 unbundled, so a missing id is a runtime crash rather than a build error.
 
 ```
-gamepak-linux.sh          installer menu (Linux)
-gamepak-windows.ps1       installer menu (Windows)
+gamepak-linux.sh            installer menu (Linux)
+gamepak-windows.ps1         installer menu (Windows)
 cartridge.conf.example      the one file a cartridge needs
 core/                       cartridge logic, no UI — this is where the tests are
-linux/                      udev rule, systemd units, mount + eject helpers
-watcher/                    resident volume watcher (Windows only, Rust)
+linux/                      udev rule, systemd units, the user service, helpers
+watcher/                    volume watcher: WM_DEVICECHANGE on Windows, the
+                            mount table on Linux (rootless install only)
 tauri-ui/                   one binary, two windows (Tauri 2 + Rust, no framework)
+  app/                      the HTML, CSS and JS, shipped unbundled
+  src-tauri/                commands and window construction
+packaging/                  AUR and Scoop manifests
 tools/                      icon generation, DOM-id check
-docs/                       screenshots
+docs/                       screenshots, PUBLISHING.md, STATUS.md
 ```
+
+[`docs/STATUS.md`](docs/STATUS.md) is the working inventory: what each module is
+for, what is built, and what is missing.
 
 When a cartridge does not open the launcher, the logs are the first place to
 look: `%LOCALAPPDATA%\PC-GamePak\watcher.log` on Windows,
 `~/.local/state/pc-gamepak/helper.log` on Linux.
 
-## Installing from a package manager
+</details>
+
+<a id="packages"></a>
+<details>
+<summary><b>Packages</b> — where this will be published, and why not everywhere</summary>
+<br />
 
 Nothing is published yet. When it is, the shortlist is the AUR (which is where
 the Steam Deck and Arch audience is), WinGet and Scoop on Windows — the channels
@@ -561,12 +681,12 @@ that can actually install the udev rule or the logon task this depends on.
 [`docs/PUBLISHING.md`](docs/PUBLISHING.md) has the reasoning, including why
 Flatpak, Snap and Homebrew are not on that list yet and what would change it.
 
-## Uninstall
+</details>
 
-Run the installer menu and choose Uninstall. It removes the udev rule and systemd
-units on Linux, or the logon task and install folder on Windows.
-
-## Thanks
+<a id="thanks"></a>
+<details>
+<summary><b>Thanks</b> — the project this forked from, and a peer</summary>
+<br />
 
 This project began as a fork of
 **[LewdM3at/PC-cartridge-system](https://github.com/LewdM3at/PC-cartridge-system)**,
@@ -582,12 +702,39 @@ This fork diverges in a few ways: 2230 NVMe rather than 2.5" SATA, a Tauri
 launcher and a create-cartridge wizard instead of per-game shell scripts, and a
 click-to-play model in place of the auto-execute-plus-allowlist one.
 
-## Licence
+### Others working on the same idea
+
+**[Uplinkpro/CartLaunchCompanion](https://github.com/Uplinkpro/CartLaunchCompanion)**
+takes the opposite half of this problem, and takes it further than this project
+does. It is a fullscreen, controller-first launcher — Avalonia and .NET, with
+trailers and shelves — that lives **on the cartridge itself**, so a drive works
+on a machine that has never been prepared. You lay the drive out yourself and its
+configurator writes a `game.json` per game.
+
+Where PC GamePak differs: the launcher is installed on the PC and the cartridge
+carries only data, so a cartridge stays a text file and some art; and there is a
+wizard that *makes* one — formatting, copying the game across, registering it as
+a Steam library — which CartLaunchCompanion leaves to you. If you want a console
+UI on a drive you assemble by hand, look there. Note its licence is PolyForm
+Noncommercial, not MIT, so code cannot move between the two projects.
+
+
+</details>
+
+<a id="licence"></a>
+<details>
+<summary><b>Licence</b> — MIT</summary>
+<br />
 
 MIT, inherited from the upstream project. See [`LICENSE`](LICENSE) — the original
 copyright notice is retained as the licence requires.
 
-## Disclaimer
+</details>
+
+<a id="disclaimer"></a>
+<details>
+<summary><b>Disclaimer</b> — a hobby project</summary>
+<br />
 
 A hobby project, not affiliated with Valve, Steam, Playnite or ITGZ.
 
@@ -595,3 +742,5 @@ Auto-detection depends on your OS automounting removable drives. Some setups nee
 that configured before any of this works.
 
 Use at your own risk.
+
+</details>
