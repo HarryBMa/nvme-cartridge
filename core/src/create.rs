@@ -2,7 +2,7 @@
 //!
 //! The full build, in order, each step optional except the last two:
 //!
-//!   1. format the drive to btrfs              (opt in, destructive)
+//!   1. format the drive to btrfs or exFAT     (opt in, destructive)
 //!   2. copy the game onto it and register the
 //!      cartridge as a Steam library           (opt in, slow)
 //!   3. copy the cover art
@@ -93,10 +93,12 @@ pub struct CartridgeRequest {
     /// Absolute path to a user-chosen cover image instead.
     #[serde(default)]
     pub cover_source: Option<String>,
-    /// Format to btrfs first. `format_confirmation` must match the drive's
+    /// Format the drive first. `format_confirmation` must match the drive's
     /// current label or nothing happens.
     #[serde(default)]
     pub format_drive: bool,
+    #[serde(default)]
+    pub format_filesystem: Option<format::Filesystem>,
     #[serde(default)]
     pub format_label: Option<String>,
     #[serde(default)]
@@ -139,6 +141,7 @@ pub struct CartridgeResult {
     pub autorun_written: bool,
     pub icon: Option<String>,
     pub formatted: bool,
+    pub formatted_filesystem: Option<format::Filesystem>,
     pub game_copied: bool,
     pub bytes_copied: u64,
     pub registered_with_steam: bool,
@@ -345,6 +348,7 @@ pub fn create_cartridge(
         autorun_written: false,
         icon: None,
         formatted: false,
+        formatted_filesystem: None,
         game_copied: false,
         bytes_copied: 0,
         registered_with_steam: false,
@@ -363,6 +367,9 @@ pub fn create_cartridge(
 
     // ---- 1. Format ------------------------------------------------------
     if request.format_drive {
+        let filesystem = request
+            .format_filesystem
+            .unwrap_or(format::Filesystem::Btrfs);
         let label = request
             .format_label
             .clone()
@@ -371,14 +378,22 @@ pub fn create_cartridge(
 
         progress(Progress {
             step: "format",
-            message: format!("Formatting {} to btrfs…", request.drive_path),
+            message: format!(
+                "Formatting {} to {}…",
+                request.drive_path,
+                match filesystem {
+                    format::Filesystem::Btrfs => "btrfs",
+                    format::Filesystem::Exfat => "exFAT",
+                }
+            ),
             done_bytes: 0,
             total_bytes: 0,
         });
 
-        format::format_btrfs(&request.drive_path, &label, &confirmation)
+        format::format_drive(&request.drive_path, filesystem, &label, &confirmation)
             .map_err(|e| e.to_string())?;
         result.formatted = true;
+        result.formatted_filesystem = Some(filesystem);
 
         // The mount point may take a moment to come back after mkfs.
         wait_for_mount(&root);

@@ -141,12 +141,19 @@
           <label class="opt opt--danger">
             <input id="opt-format" type="checkbox" />
             <span class="opt__body">
-              <span class="opt__label">Format to btrfs first</span>
-              <span class="opt__hint">Erases everything on the drive.</span>
+              <span class="opt__label">Format the drive first</span>
+              <span class="opt__hint">Erases everything on the drive. Choose btrfs or exFAT below.</span>
             </span>
           </label>
 
           <div id="format-fields" hidden>
+            <label class="field">
+              <span class="field__label">Filesystem</span>
+              <select id="format-filesystem">
+                <option value="btrfs">btrfs (best for NVMe cartridges)</option>
+                <option value="exfat">exFAT (best for broad removable-media compatibility)</option>
+              </select>
+            </label>
             <label class="field">
               <span class="field__label">New drive name</span>
               <input id="format-label" type="text" maxlength="11" autocomplete="off"
