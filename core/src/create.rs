@@ -124,6 +124,29 @@ pub struct CartridgeRequest {
     pub collection_cover_source: Option<String>,
 }
 
+impl CartridgeRequest {
+    /// A single-game view of this request, so the copy helpers never have to
+    /// know about bundles. The drive and the copy settings are shared; the
+    /// game's own identity replaces the collection's.
+    fn for_game(&self, game: &BundleGameRequest) -> CartridgeRequest {
+        CartridgeRequest {
+            title: game.title.clone(),
+            executable: game.executable.clone(),
+            app_id: game.app_id.clone(),
+            playnite_id: game.playnite_id.clone(),
+            cover_source: game.cover_source.clone(),
+            games: None,
+            // The format runs once, before any game is copied.
+            format_drive: false,
+            // Which file to start is picked per game by the ranking in
+            // portable.rs: one dropdown per game would be more wizard than the
+            // choice is worth.
+            copy_executable: None,
+            ..self.clone()
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Progress {
@@ -399,103 +422,168 @@ pub fn create_cartridge(
         wait_for_mount(&root);
     }
 
-    // ---- 2. Bundle mode: write each game, then bail early ----------------
-    if let Some(bundle_games) = &request.games {
-        if !bundle_games.is_empty() {
-            // Validate every game's executable before writing anything.
-            for g in bundle_games {
-                let exec = sanitize_conf_value(&g.executable);
-                validate_executable(&exec, &root)?;
+    // ---- 2. Bundle mode: build every game, then bail early ---------------
+    if let Some(bundle_games) = request.games.as_deref().filter(|g| !g.is_empty()) {
+        // Nothing is written until every launch target that already exists
+        // checks out. A copy creates its own target, so those are checked once
+        // the files are there.
+        if !request.copy_game {
+            for game in bundle_games {
+                validate_executable(&sanitize_conf_value(&game.executable), &root)?;
+            }
+        }
+
+        // ---- Copy the games ----------------------------------------------
+        //
+        // Each game is copied as if it were the only one on the cartridge: the
+        // copy helpers take a single-game view of the request and never learn
+        // that this is a bundle.
+        let mut entries: Vec<(String, String, Option<String>)> = Vec::new();
+
+        for game in bundle_games {
+            let game_title = sanitize_conf_value(&game.title);
+            if game_title.is_empty() {
+                return Err("Every game in a collection needs a title.".into());
+            }
+            let mut executable = sanitize_conf_value(&game.executable);
+
+            if request.copy_game {
+                let job = request.for_game(game);
+                match copy_game(&job, &root, progress) {
+                    Ok(Some(copied)) => {
+                        result.game_copied = true;
+                        result.bytes_copied += copied.bytes;
+                        result.registered_with_steam |= copied.registered_with_steam;
+                        if result.game_folder.is_none() {
+                            result.game_folder = copied.folder.clone();
+                        }
+                        // A generic copy moves the launch target onto the
+                        // cartridge; a Steam copy keeps its steam:// URI.
+                        if let Some(on_cartridge) = copied.executable {
+                            executable = on_cartridge;
+                        }
+                    }
+                    Ok(None) => {}
+                    // The cartridge is still worth finishing without the files.
+                    Err(e) => warnings.push(format!("{game_title} was not copied: {e}")),
+                }
+                validate_executable(&executable, &root)?;
             }
 
-            // Collection cover.
-            progress(Progress {
-                step: "cover",
-                message: "Copying collection cover art…".to_string(),
-                done_bytes: 0,
-                total_bytes: 0,
-            });
-            let coll_cover_src = request
+            entries.push((game_title, executable, None));
+        }
+
+        // ---- Per-game cover art -------------------------------------------
+        progress(Progress {
+            step: "cover",
+            message: "Copying cover art…".to_string(),
+            done_bytes: 0,
+            total_bytes: 0,
+        });
+
+        for (index, (game, entry)) in bundle_games.iter().zip(entries.iter_mut()).enumerate() {
+            let source = match cover_source(
+                game.cover_source.as_deref(),
+                game.app_id.as_deref(),
+                game.playnite_id.as_deref(),
+            ) {
+                Ok(Some(path)) => path,
+                Ok(None) => continue,
+                Err(e) => {
+                    warnings.push(format!("No cover for {}: {e}", entry.0));
+                    continue;
+                }
+            };
+            match copy_cover(&source, &root, &format!("cover_{index}")) {
+                Ok(name) => entry.2 = Some(name),
+                Err(e) => warnings.push(format!("Cover art for {} was not copied: {e}", entry.0)),
+            }
+        }
+
+        // ---- The collection's own art -------------------------------------
+        //
+        // Whatever the wizard chose; failing that the first game's, so a
+        // collection is never blank.
+        let collection_art = match cover_source(
+            request
                 .collection_cover_source
                 .as_deref()
-                .filter(|s| !s.trim().is_empty())
-                .or_else(|| {
-                    request
-                        .cover_source
-                        .as_deref()
-                        .filter(|s| !s.trim().is_empty())
-                });
-            let coll_cover_dest = match write_cover_path(&root, coll_cover_src, "collection") {
-                Ok(p) => p,
+                .or(request.cover_source.as_deref()),
+            None,
+            None,
+        ) {
+            Ok(found) => found,
+            Err(e) => {
+                warnings.push(format!("Collection cover art was not copied: {e}"));
+                None
+            }
+        }
+        .or_else(|| {
+            let first = bundle_games.first()?;
+            cover_source(
+                first.cover_source.as_deref(),
+                first.app_id.as_deref(),
+                first.playnite_id.as_deref(),
+            )
+            .ok()
+            .flatten()
+        });
+
+        let collection_cover = match collection_art {
+            Some(source) => match copy_cover(&source, &root, "collection") {
+                Ok(name) => Some(root.join(name)),
                 Err(e) => {
                     warnings.push(format!("Collection cover art was not copied: {e}"));
                     None
                 }
-            };
-            result.cover_written = coll_cover_dest.is_some();
+            },
+            None => None,
+        };
+        result.cover_written = collection_cover.is_some();
 
-            // Per-game covers.
-            let mut game_tuples: Vec<(String, String, Option<String>)> = Vec::new();
-            for (i, g) in bundle_games.iter().enumerate() {
-                let game_title = sanitize_conf_value(&g.title);
-                let game_exec = sanitize_conf_value(&g.executable);
-                let game_cover_src = g
-                    .cover_source
-                    .as_deref()
-                    .filter(|s| !s.trim().is_empty());
-                let stem = format!("cover_{i}");
-                let game_cover_name =
-                    write_cover_path(&root, game_cover_src, &stem)
-                        .unwrap_or(None)
-                        .and_then(|p| {
-                            p.file_name()
-                                .and_then(|n| n.to_str())
-                                .map(str::to_string)
-                        });
-                game_tuples.push((game_title, game_exec, game_cover_name));
-            }
-
-            // cartridge.conf in bundle format.
-            let coll_cover_name = coll_cover_dest
+        // ---- cartridge.conf -----------------------------------------------
+        let tuples: Vec<(&str, &str, Option<&str>)> = entries
+            .iter()
+            .map(|(t, e, c)| (t.as_str(), e.as_str(), c.as_deref()))
+            .collect();
+        let conf = render_bundle_conf(
+            &title,
+            collection_cover
                 .as_ref()
                 .and_then(|p| p.file_name())
-                .and_then(|n| n.to_str());
-            let tuples_ref: Vec<(&str, &str, Option<&str>)> = game_tuples
-                .iter()
-                .map(|(t, e, c)| (t.as_str(), e.as_str(), c.as_deref()))
-                .collect();
-            let conf = render_bundle_conf(&title, coll_cover_name, &tuples_ref);
-            let conf_path = root.join("cartridge.conf");
-            std::fs::write(&conf_path, conf)
-                .map_err(|e| format!("Could not write {}: {e}", conf_path.display()))?;
-            result.conf_path = conf_path.to_string_lossy().into_owned();
+                .and_then(|n| n.to_str()),
+            &tuples,
+        );
+        let conf_path = root.join("cartridge.conf");
+        std::fs::write(&conf_path, conf)
+            .map_err(|e| format!("Could not write {}: {e}", conf_path.display()))?;
+        result.conf_path = conf_path.to_string_lossy().into_owned();
 
-            // autorun.inf.
-            progress(Progress {
-                step: "autorun",
-                message: "Naming the drive…".to_string(),
-                done_bytes: 0,
-                total_bytes: 0,
-            });
-            match autorun::write_autorun(&root, &title, coll_cover_dest.as_deref()) {
-                Ok(icon) => {
-                    result.autorun_written = true;
-                    result.icon = icon;
-                }
-                Err(e) => warnings.push(format!("autorun.inf was not written: {e}")),
+        // ---- autorun.inf ---------------------------------------------------
+        progress(Progress {
+            step: "autorun",
+            message: "Naming the drive…".to_string(),
+            done_bytes: 0,
+            total_bytes: 0,
+        });
+        match autorun::write_autorun(&root, &title, collection_cover.as_deref()) {
+            Ok(icon) => {
+                result.autorun_written = true;
+                result.icon = icon;
             }
-
-            if !result.cover_written {
-                warnings.push(
-                    "No collection cover art on the cartridge. \
-                     The launcher will show a placeholder."
-                        .to_string(),
-                );
-            }
-
-            result.warnings = warnings;
-            return Ok(result);
+            Err(e) => warnings.push(format!("autorun.inf was not written: {e}")),
         }
+
+        if !result.cover_written {
+            warnings.push(
+                "No collection cover art on the cartridge. \
+                 The launcher will show a placeholder."
+                    .to_string(),
+            );
+        }
+
+        result.warnings = warnings;
+        return Ok(result);
     }
 
     // ---- 2b. Copy the game (single-game only) ----------------------------
@@ -933,38 +1021,56 @@ fn resolve_target(requested: &str) -> Result<PathBuf, String> {
 
 /// Copy the chosen art to the cartridge. Returns where it landed.
 fn write_cover(root: &Path, request: &CartridgeRequest) -> Result<Option<PathBuf>, String> {
-    let source = match (&request.cover_source, &request.app_id, &request.playnite_id) {
-        (Some(path), _, _) if !path.trim().is_empty() => PathBuf::from(path),
-        (_, Some(app_id), _) if is_numeric(app_id) => {
-            let local =
-                steam::steam_root().and_then(|steam_root| steam::find_cover(&steam_root, app_id));
-            match local.or_else(|| sgdb::last_used_artwork(&format!("steam:{app_id}"))) {
-                Some(p) => p,
-                None => return Ok(None),
-            }
-        }
-        (_, _, Some(playnite_id)) => {
-            let root_dir = playnite::playnite_root()
-                .ok_or_else(|| "no Playnite installation to take the cover from".to_string())?;
-            let found = playnite::find_exports(&root_dir)
-                .iter()
-                .filter_map(|p| playnite::import_from(p).ok())
-                .flatten()
-                .find(|g| &g.id == playnite_id)
-                .and_then(|g| g.cover)
-                .and_then(|c| playnite::resolve_cover(&root_dir, &c));
-            match found {
-                Some(p) => p,
-                None => match sgdb::last_used_artwork(&format!("playnite:{playnite_id}")) {
-                    Some(p) => p,
-                    None => return Ok(None),
-                },
-            }
-        }
-        _ => return Ok(None),
+    let Some(source) = cover_source(
+        request.cover_source.as_deref(),
+        request.app_id.as_deref(),
+        request.playnite_id.as_deref(),
+    )?
+    else {
+        return Ok(None);
     };
+    copy_cover(&source, root, "cover").map(|name| Some(root.join(name)))
+}
 
-    let meta = std::fs::metadata(&source).map_err(|e| format!("{}: {e}", source.display()))?;
+/// Where the art for one game currently lives.
+///
+/// A path chosen in the wizard wins; otherwise it comes from Steam's cache,
+/// Playnite's, or the last artwork downloaded for this game, whichever the game
+/// came from. `Ok(None)` means there is simply no art to copy, which is not an
+/// error.
+fn cover_source(
+    chosen: Option<&str>,
+    app_id: Option<&str>,
+    playnite_id: Option<&str>,
+) -> Result<Option<PathBuf>, String> {
+    if let Some(path) = chosen.map(str::trim).filter(|p| !p.is_empty()) {
+        return Ok(Some(PathBuf::from(path)));
+    }
+    if let Some(app_id) = app_id.filter(|id| is_numeric(id)) {
+        let local = steam::steam_root().and_then(|root| steam::find_cover(&root, app_id));
+        return Ok(local.or_else(|| sgdb::last_used_artwork(&format!("steam:{app_id}"))));
+    }
+    if let Some(playnite_id) = playnite_id {
+        let root_dir = playnite::playnite_root()
+            .ok_or_else(|| "no Playnite installation to take the cover from".to_string())?;
+        let found = playnite::find_exports(&root_dir)
+            .iter()
+            .filter_map(|p| playnite::import_from(p).ok())
+            .flatten()
+            .find(|g| g.id == playnite_id)
+            .and_then(|g| g.cover)
+            .and_then(|c| playnite::resolve_cover(&root_dir, &c));
+        return Ok(found.or_else(|| sgdb::last_used_artwork(&format!("playnite:{playnite_id}"))));
+    }
+    Ok(None)
+}
+
+/// Copy art onto the cartridge as `<stem>.<its extension>`.
+///
+/// Returns the name relative to the cartridge root, which is what goes into
+/// cartridge.conf.
+fn copy_cover(source: &Path, root: &Path, stem: &str) -> Result<String, String> {
+    let meta = std::fs::metadata(source).map_err(|e| format!("{}: {e}", source.display()))?;
     if !meta.is_file() {
         return Err(format!("{} is not a file", source.display()));
     }
@@ -983,50 +1089,11 @@ fn write_cover(root: &Path, request: &CartridgeRequest) -> Result<Option<PathBuf
         .and_then(|e| e.to_str())
         .map(|e| e.to_lowercase())
         .unwrap_or_else(|| "jpg".to_string());
-    let destination = root.join(format!("cover.{extension}"));
+    let relative = format!("{stem}.{extension}");
 
-    std::fs::copy(&source, &destination)
-        .map_err(|e| format!("could not write {}: {e}", destination.display()))?;
-    Ok(Some(destination))
-}
-
-/// Copy an image from an explicit `source_path` to `<root>/<stem>.<ext>`.
-///
-/// Used for bundle covers (collection + per-game) where the source is already
-/// a concrete path rather than being looked up by app id or Playnite id.
-/// Returns `None` (not an error) when `source_path` is absent.
-fn write_cover_path(
-    root: &Path,
-    source_path: Option<&str>,
-    stem: &str,
-) -> Result<Option<PathBuf>, String> {
-    let src_str = match source_path {
-        Some(s) if !s.trim().is_empty() => s,
-        _ => return Ok(None),
-    };
-    let source = Path::new(src_str);
-    let meta =
-        std::fs::metadata(source).map_err(|e| format!("{}: {e}", source.display()))?;
-    if !meta.is_file() {
-        return Err(format!("{} is not a file", source.display()));
-    }
-    if meta.len() > MAX_COVER_BYTES {
-        return Err(format!(
-            "{} is {:.1} MB; the limit is {} MB",
-            source.display(),
-            meta.len() as f64 / 1_048_576.0,
-            MAX_COVER_BYTES / 1_048_576
-        ));
-    }
-    let extension = source
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
-        .unwrap_or_else(|| "jpg".to_string());
-    let destination = root.join(format!("{stem}.{extension}"));
-    std::fs::copy(source, &destination)
-        .map_err(|e| format!("could not write {}: {e}", destination.display()))?;
-    Ok(Some(destination))
+    std::fs::copy(source, root.join(&relative))
+        .map_err(|e| format!("could not write {}: {e}", root.join(&relative).display()))?;
+    Ok(relative)
 }
 
 /// Strip anything that would corrupt the `key=value` file.
@@ -1135,6 +1202,66 @@ pub fn render_bundle_conf(
     out
 }
 
+/// A name for a cartridge carrying several games, from what they are called.
+///
+/// Sequels usually share their opening words — *God of War* and *God of War
+/// Ragnarök* — so the shared run becomes the collection's name. When the titles
+/// share nothing worth using, the count says what it is instead. The wizard
+/// offers this; the user can always type their own.
+pub fn suggest_collection_name(titles: &[String]) -> String {
+    let cleaned: Vec<Vec<String>> = titles
+        .iter()
+        .map(|t| {
+            sanitize_conf_value(t)
+                .split_whitespace()
+                .map(str::to_string)
+                .collect()
+        })
+        .filter(|words: &Vec<String>| !words.is_empty())
+        .collect();
+
+    let Some(first) = cleaned.first() else {
+        return "Collection".to_string();
+    };
+    if cleaned.len() == 1 {
+        return first.join(" ");
+    }
+
+    // The longest run of opening words every title agrees on, compared without
+    // case but kept in the first title's casing.
+    let mut shared: Vec<&str> = Vec::new();
+    for (index, word) in first.iter().enumerate() {
+        let agreed = cleaned[1..].iter().all(|words| {
+            words
+                .get(index)
+                .is_some_and(|other| other.to_lowercase() == word.to_lowercase())
+        });
+        if !agreed {
+            break;
+        }
+        shared.push(word);
+    }
+
+    // One short shared word ("The", "Halo") names nothing on its own.
+    let worth_using = shared.len() >= 2
+        || shared
+            .first()
+            .is_some_and(|w| w.chars().count() >= 4 && !is_stop_word(w));
+
+    if worth_using {
+        format!("{} Collection", shared.join(" "))
+    } else {
+        format!("{} and {} more", first.join(" "), cleaned.len() - 1)
+    }
+}
+
+fn is_stop_word(word: &str) -> bool {
+    matches!(
+        word.to_lowercase().as_str(),
+        "the" | "a" | "an" | "of" | "and" | "for" | "in" | "on"
+    )
+}
+
 fn is_numeric(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
 }
@@ -1239,6 +1366,153 @@ mod tests {
         assert!(err.contains("not a removable drive"), "{err}");
         // Crucially, it bailed before the format step emitted anything.
         assert!(seen.is_empty(), "{seen:?}");
+    }
+
+    #[test]
+    fn a_per_game_request_keeps_the_drive_but_never_the_format() {
+        let request = CartridgeRequest {
+            drive_path: "/media/cart".into(),
+            title: "God of War Collection".into(),
+            collection_cover_source: Some("/pictures/collection.png".into()),
+            format_drive: true,
+            format_confirmation: Some("CART".into()),
+            copy_game: true,
+            copy_executable: Some("wrong-game.exe".into()),
+            ..Default::default()
+        };
+        let game = BundleGameRequest {
+            title: "God of War".into(),
+            executable: "steam://rungameid/1593500".into(),
+            app_id: Some("1593500".into()),
+            ..Default::default()
+        };
+
+        let job = request.for_game(&game);
+        assert_eq!(job.drive_path, "/media/cart");
+        assert!(job.copy_game);
+        assert_eq!(job.title, "God of War");
+        assert_eq!(job.app_id.as_deref(), Some("1593500"));
+        // Formatting once per game would wipe whatever was copied before it.
+        assert!(!job.format_drive);
+        // And the collection's own fields must not leak into a game: the
+        // single-game executable pick belongs to a different game entirely.
+        assert!(job.copy_executable.is_none());
+        assert!(job.games.is_none());
+    }
+
+    #[test]
+    fn art_is_copied_under_the_stem_it_was_given() {
+        let scratch = crate::testutil::Scratch::new("cover-copy");
+        scratch.write("source.PNG", b"not really a png");
+        let root = scratch.path().join("cartridge");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let name = copy_cover(&scratch.path().join("source.PNG"), &root, "cover_1").unwrap();
+
+        // Lowercased extension, because that name goes straight into
+        // cartridge.conf for the launcher to resolve.
+        assert_eq!(name, "cover_1.png");
+        assert!(root.join("cover_1.png").is_file());
+    }
+
+    #[test]
+    fn art_that_is_missing_or_oversized_is_refused() {
+        let scratch = crate::testutil::Scratch::new("cover-refuse");
+        let root = scratch.path().join("cartridge");
+        std::fs::create_dir_all(&root).unwrap();
+
+        assert!(copy_cover(&scratch.path().join("nothing.jpg"), &root, "cover").is_err());
+
+        scratch.write("huge.jpg", &vec![0u8; (MAX_COVER_BYTES + 1) as usize]);
+        let err = copy_cover(&scratch.path().join("huge.jpg"), &root, "cover").unwrap_err();
+        assert!(err.contains("the limit is"), "{err}");
+        assert!(!root.join("cover.jpg").exists());
+    }
+
+    #[test]
+    fn a_chosen_cover_beats_the_libraries() {
+        // Nothing is looked up when the wizard supplied a path, so this holds
+        // on a machine with neither Steam nor Playnite installed.
+        let chosen = cover_source(Some("/pictures/gow.png"), Some("1593500"), None).unwrap();
+        assert_eq!(chosen, Some(PathBuf::from("/pictures/gow.png")));
+
+        // Blank counts as unset rather than as a path.
+        assert!(cover_source(Some("   "), None, None).unwrap().is_none());
+        assert!(cover_source(None, None, None).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_collection_is_named_after_what_the_games_share() {
+        assert_eq!(
+            suggest_collection_name(&["God of War".into(), "God of War Ragnarök".into(),]),
+            "God of War Collection"
+        );
+        assert_eq!(
+            suggest_collection_name(&["Mass Effect 2".into(), "Mass Effect 3".into()]),
+            "Mass Effect Collection"
+        );
+        // Compared without case, but written in the first title's casing.
+        assert_eq!(
+            suggest_collection_name(&["Halo 3".into(), "HALO 3 ODST".into()]),
+            "Halo 3 Collection"
+        );
+    }
+
+    #[test]
+    fn titles_with_nothing_in_common_are_counted_instead() {
+        let name =
+            suggest_collection_name(&["Hollow Knight".into(), "Hades".into(), "Tunic".into()]);
+        assert_eq!(name, "Hollow Knight and 2 more");
+
+        // A single shared stop word names nothing on its own.
+        let name = suggest_collection_name(&["The Witness".into(), "The Talos Principle".into()]);
+        assert_eq!(name, "The Witness and 1 more");
+    }
+
+    #[test]
+    fn naming_a_collection_copes_with_nothing_to_go_on() {
+        assert_eq!(suggest_collection_name(&["Solo".into()]), "Solo");
+        assert_eq!(suggest_collection_name(&[]), "Collection");
+        assert_eq!(suggest_collection_name(&["   ".into()]), "Collection");
+    }
+
+    #[test]
+    fn what_the_wizard_writes_for_a_bundle_is_what_the_launcher_reads() {
+        // The round trip is the property that matters: the writer and the
+        // reader are in different modules and could drift apart.
+        let scratch = crate::testutil::Scratch::new("bundle-round-trip");
+        let root = scratch.path();
+        scratch.write("gow.png", b"pretend png");
+
+        let art = copy_cover(&root.join("gow.png"), root, "cover_0").unwrap();
+        let conf = render_bundle_conf(
+            "God of War Collection",
+            Some("collection.jpg"),
+            &[
+                (
+                    "God of War",
+                    "steam://rungameid/1593500",
+                    Some(art.as_str()),
+                ),
+                ("God of War Ragnarök", "steam://rungameid/2322010", None),
+            ],
+        );
+        std::fs::write(root.join("cartridge.conf"), conf).unwrap();
+
+        let info = crate::cartridge::read_cartridge_info(root.to_str().unwrap()).unwrap();
+
+        assert!(info.is_bundle);
+        assert_eq!(info.title, "God of War Collection");
+        assert_eq!(info.games.len(), 2);
+        assert_eq!(info.games[0].title, "God of War");
+        assert_eq!(info.games[1].executable, "steam://rungameid/2322010");
+        assert!(
+            info.games[0].cover_path.ends_with("cover_0.png"),
+            "{:?}",
+            info.games[0].cover_path
+        );
+        // Enter still plays something: the first game is the primary target.
+        assert_eq!(info.executable, "steam://rungameid/1593500");
     }
 
     #[test]

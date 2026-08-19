@@ -23,17 +23,12 @@ use crate::drives;
 const BTRFS_MAX_LABEL: usize = 256;
 const EXFAT_MAX_LABEL: usize = 11;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Filesystem {
+    #[default]
     Btrfs,
     Exfat,
-}
-
-impl Default for Filesystem {
-    fn default() -> Self {
-        Self::Btrfs
-    }
 }
 
 impl Filesystem {
@@ -365,10 +360,22 @@ mod tests {
 
     #[test]
     fn accepts_sensible_labels_and_preserves_case() {
-        assert_eq!(check_label_for(Filesystem::Btrfs, "cinder").unwrap(), "cinder");
-        assert_eq!(check_label_for(Filesystem::Btrfs, "  Hollow ").unwrap(), "Hollow");
-        assert_eq!(check_label_for(Filesystem::Exfat, "CART_01").unwrap(), "CART_01");
-        assert_eq!(check_label_for(Filesystem::Exfat, "MY CART").unwrap(), "MY CART");
+        assert_eq!(
+            check_label_for(Filesystem::Btrfs, "cinder").unwrap(),
+            "cinder"
+        );
+        assert_eq!(
+            check_label_for(Filesystem::Btrfs, "  Hollow ").unwrap(),
+            "Hollow"
+        );
+        assert_eq!(
+            check_label_for(Filesystem::Exfat, "CART_01").unwrap(),
+            "CART_01"
+        );
+        assert_eq!(
+            check_label_for(Filesystem::Exfat, "MY CART").unwrap(),
+            "MY CART"
+        );
     }
 
     #[test]
