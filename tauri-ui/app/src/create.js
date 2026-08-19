@@ -5,10 +5,17 @@
  *   list_games()                     -> [{ id, name, library, source, sizeOnDisk,
  *                                          hasCover, executable, canCopy }]
  *   game_cover({ library, id })      -> "data:image/…" | ""
+ *   get_settings()                    -> { steamgriddbEnabled, steamgriddbApiKey }
+ *   set_settings({ settings })        -> the settings as stored
+ *   suggest_collection_name({ titles }) -> "God of War Collection"
  *   sgdb_search_games({ query })      -> [{ id, name }]
  *   sgdb_get_artwork({ gameId, artType }) -> [{ id, url, thumb, width, height }]
  *   sgdb_download_artwork({ url, cacheKey, gameKey? }) -> "/abs/path/image.jpg"
  *   sgdb_last_used_artwork({ gameKey }) -> { path, dataUri } | null
+ *   pick_cover_image()               -> { path, preview } | null
+ *   host_platform()                  -> "windows" | "linux" | …
+ *   tuning_plan({ drivePath, tweaks, applying })  -> [command, …]
+ *   apply_tuning({ drivePath, tweaks, applying }) -> [what was done, …]
  *   list_target_drives()             -> [{ path, label, totalBytes, freeBytes, hasCartridge }]
  *   format_plan({ drivePath })       -> { path, currentLabel, device, totalBytes, warning }
  *   executable_choices({ playniteId }) -> [{ relative, name, score }]  best first
@@ -41,6 +48,7 @@ const el = {
   previewTitle: document.getElementById("preview-title"),
   previewSub: document.getElementById("preview-sub"),
   previewSource: document.getElementById("preview-source"),
+  previewEyebrow: document.getElementById("preview-eyebrow"),
   btnSgdb: document.getElementById("btn-sgdb"),
   drives: document.getElementById("drives"),
   drivesEmpty: document.getElementById("drives-empty"),
@@ -53,6 +61,8 @@ const el = {
   optFormat: document.getElementById("opt-format"),
   formatFields: document.getElementById("format-fields"),
   formatFilesystem: document.getElementById("format-filesystem"),
+  filesystemHint: document.getElementById("filesystem-hint"),
+  labelHint: document.getElementById("label-hint"),
   formatLabel: document.getElementById("format-label"),
   formatConfirm: document.getElementById("format-confirm"),
   formatWarning: document.getElementById("format-warning"),
@@ -65,6 +75,23 @@ const el = {
   progressFill: document.getElementById("progress-fill"),
   progressText: document.getElementById("progress-text"),
   status: document.getElementById("status"),
+  optCopyLabel: document.getElementById("opt-copy-label"),
+  optTrimRow: document.getElementById("opt-trim-row"),
+  optTrim: document.getElementById("opt-trim"),
+  optTuneRow: document.getElementById("opt-tune-row"),
+  optTune: document.getElementById("opt-tune"),
+  btnTuneCommands: document.getElementById("btn-tune-commands"),
+  btnTuneUndo: document.getElementById("btn-tune-undo"),
+  btnCollectionCover: document.getElementById("btn-collection-cover"),
+  btnCollectionCoverClear: document.getElementById("btn-collection-cover-clear"),
+  btnSettings: document.getElementById("btn-settings"),
+  settingsDialog: document.getElementById("settings-dialog"),
+  settingsClose: document.getElementById("settings-close"),
+  settingsSave: document.getElementById("settings-save"),
+  settingsStatus: document.getElementById("settings-status"),
+  setSgdb: document.getElementById("set-sgdb"),
+  setSgdbKey: document.getElementById("set-sgdb-key"),
+  sgdbKeyField: document.getElementById("sgdb-key-field"),
   sgdbDialog: document.getElementById("sgdb-dialog"),
   sgdbSearch: document.getElementById("sgdb-search"),
   sgdbType: document.getElementById("sgdb-type"),
@@ -91,6 +118,16 @@ let building = false;
 /** Candidates for what Play should start, when copying a non-Steam game. */
 let exeCandidates = [];
 let selectedCoverSource = null;
+/** True while the drive name is the one we derived, not one that was typed. */
+let labelIsOurs = true;
+/** Which OS this is, so the wizard offers only what exists here. */
+let platform = "";
+/** The Windows settings this wizard knows how to change, and put back. */
+const TWEAKS = ["defender", "indexing"];
+/** What the user has switched on. Offline until they say otherwise. */
+let settings = { steamgriddbEnabled: false, steamgriddbApiKey: "" };
+/** Artwork chosen for the collection: { path, preview }. */
+let collectionCover = null;
 let sgdbSearchTimer = null;
 let sgdbResultsFor = [];
 let sgdbSelectedGameId = null;
@@ -264,7 +301,9 @@ function toggleBundleGame(game) {
   }
   renderGames();
   renderBundlePanel();
+  refreshOptions();
   refreshCreateButton();
+  refreshCollectionPreview();
 }
 
 function renderBundlePanel() {
@@ -318,32 +357,119 @@ function renderBundlePanel() {
     el.bundleSpace.classList.remove("is-error");
   }
 
-  // Auto-suggest collection title from game names.
-  if (list.length >= 2 && !el.collectionTitle.value) {
-    const commonWord = findCommonWord(list.map((g) => g.name));
-    if (commonWord) {
-      el.collectionTitle.placeholder = `${commonWord} Collection`;
+  // Offer a name, as a placeholder so it never overwrites what was typed.
+  if (list.length >= 2) suggestCollectionName(list.map((g) => g.name));
+}
+
+/**
+ * Offer a name for the collection.
+ *
+ * The backend works it out from what the titles share — *God of War* and *God
+ * of War Ragnarök* give *God of War Collection* — so the wizard and anything
+ * else that needs a name agree on one answer.
+ */
+async function suggestCollectionName(titles) {
+  try {
+    const suggested = await invoke("suggest_collection_name", { titles });
+    if (suggested) {
+      el.collectionTitle.placeholder = suggested;
+      // The preview shows the name that will be written, which until something
+      // is typed is this one.
+      refreshCollectionPreview();
     }
+  } catch {
+    // A placeholder is a nicety; the field still works without one.
   }
 }
 
-/** Find a common word across game names for auto-suggesting a collection title. */
-function findCommonWord(names) {
-  if (names.length === 0) return "";
-  const wordSets = names.map((n) =>
-    new Set(n.toLowerCase().split(/\s+/).filter((w) => w.length > 3)),
-  );
-  for (const word of wordSets[0]) {
-    if (wordSets.every((s) => s.has(word))) {
-      return word.charAt(0).toUpperCase() + word.slice(1);
-    }
+/**
+ * Show the collection in the preview, rather than whichever game happened to be
+ * clicked last: from two games on, the cartridge *is* the collection.
+ */
+async function refreshCollectionPreview() {
+  const list = [...bundleGames.values()];
+  if (list.length < 2) {
+    el.previewEyebrow.textContent = "Selected";
+    return;
   }
-  return "";
+
+  el.previewEyebrow.textContent = "Collection";
+  el.previewTitle.textContent =
+    el.collectionTitle.value.trim() || el.collectionTitle.placeholder || "Collection";
+  el.previewSub.textContent = `${list.length} games`;
+
+  // Chosen artwork wins, so the preview shows what will be written; failing
+  // that the first game's, which is what the backend falls back to anyway.
+  if (collectionCover?.preview) {
+    setPreviewArt(collectionCover.preview, "Chosen file");
+    return;
+  }
+  const first = list[0];
+  if (!first.hasCover) {
+    setPreviewArt("", "");
+    return;
+  }
+  try {
+    const uri = await invoke("game_cover", { library: first.library, id: first.id });
+    // The selection can move while the art is being fetched.
+    if (uri && isBundleMode() && [...bundleGames.values()][0]?.id === first.id) {
+      setPreviewArt(uri, `From ${first.name}`);
+    }
+  } catch {
+    // No art is not an error.
+  }
 }
 
 /** Whether we are in bundle mode (2+ games selected). */
 function isBundleMode() {
   return bundleGames.size >= 2;
+}
+
+/* --------------------------------------------------------------- settings */
+
+/** Apply the settings to everything whose visibility depends on them. */
+function applySettings() {
+  el.setSgdb.checked = Boolean(settings.steamgriddbEnabled);
+  el.setSgdbKey.value = settings.steamgriddbApiKey ?? "";
+  el.sgdbKeyField.hidden = !el.setSgdb.checked;
+  el.btnSgdb.hidden = !settings.steamgriddbEnabled;
+}
+
+async function loadSettings() {
+  try {
+    settings = await invoke("get_settings");
+  } catch {
+    // The defaults are the offline ones, which is the safe way to be wrong.
+  }
+  applySettings();
+}
+
+function openSettings() {
+  applySettings();
+  el.settingsStatus.textContent = "";
+  if (typeof el.settingsDialog.showModal === "function") el.settingsDialog.showModal();
+  else el.settingsDialog.setAttribute("open", "");
+}
+
+async function saveSettings() {
+  el.settingsSave.disabled = true;
+  try {
+    settings = await invoke("set_settings", {
+      settings: {
+        steamgriddbEnabled: el.setSgdb.checked,
+        steamgriddbApiKey: el.setSgdbKey.value.trim(),
+      },
+    });
+    applySettings();
+    refreshOptions();
+    el.settingsStatus.textContent = settings.steamgriddbEnabled
+      ? "Saved. Artwork lookup is on."
+      : "Saved. The wizard stays offline.";
+  } catch (error) {
+    el.settingsStatus.textContent = String(error);
+  } finally {
+    el.settingsSave.disabled = false;
+  }
 }
 
 /* ----------------------------------------------------------------- drives */
@@ -431,37 +557,65 @@ async function selectDrive(drive) {
 /* ---------------------------------------------------------------- options */
 
 function refreshOptions() {
-  // In bundle mode, the copy/exe options are hidden — each game's steam:// URI
-  // handles launching without copying files.
   const bundle = isBundleMode();
-  document.getElementById("options").hidden = bundle;
+  const list = [...bundleGames.values()];
 
-  if (bundle) return;
+  // Hidden entirely until the lookup is switched on: an always-visible button
+  // that only ever explains why it cannot work is worse than no button.
+  el.btnSgdb.hidden = !settings.steamgriddbEnabled;
+  el.btnSgdb.disabled = !((selectedGame && !manualMode) || el.customTitle.value.trim());
 
-  const copyable = !manualMode && Boolean(selectedGame?.canCopy);
+  // Every chosen game has to be copyable, since the option copies all of them.
+  const copyable = bundle
+    ? list.length > 0 && list.every((g) => g.canCopy)
+    : !manualMode && Boolean(selectedGame?.canCopy);
   el.optCopy.disabled = !copyable;
   if (!copyable) el.optCopy.checked = false;
-  el.btnSgdb.disabled = !Boolean((selectedGame && !manualMode) || el.customTitle.value.trim());
+
+  el.optCopyLabel.textContent = bundle
+    ? `Copy all ${list.length} games onto the cartridge`
+    : "Copy the game onto the cartridge";
 
   // The two routes differ enough to be worth saying which one applies.
-  const isSteam = selectedGame?.library === "steam";
-  let hint = copyable
-    ? isSteam
+  const chosen = bundle ? list : selectedGame ? [selectedGame] : [];
+  const allSteam = chosen.length > 0 && chosen.every((g) => g.library === "steam");
+  let hint;
+  if (copyable && bundle) {
+    hint = allSteam
+      ? `Copies all ${list.length} games and registers the drive as a Steam library, so Steam plays from the cartridge.`
+      : `Copies all ${list.length} games onto the cartridge and points each Play button at a file inside it.`;
+  } else if (copyable) {
+    hint = allSteam
       ? "Also registers the drive as a Steam library, so Steam plays from the cartridge instead of your internal copy."
-      : "Copies the game's folder onto the cartridge and points Play at a file inside it. No launcher needed."
-    : manualMode
-      ? "Only available for a game picked from the list."
-      : "Playnite does not record where this one is installed, so there is nothing to copy.";
-  if (el.optCopy.checked && selectedGame && selectedDrive) {
+      : "Copies the game's folder onto the cartridge and points Play at a file inside it. No launcher needed.";
+  } else if (manualMode) {
+    hint = "Only available for a game picked from the list.";
+  } else if (chosen.length === 0) {
+    hint = "Pick a game first.";
+  } else {
+    hint = "Playnite does not record where one of these is installed, so there is nothing to copy.";
+  }
+
+  // Space is only a problem when the files are actually going across.
+  if (el.optCopy.checked && chosen.length > 0 && selectedDrive) {
     const drive = drives.find((d) => d.path === selectedDrive);
-    if (drive) {
+    const needed = chosen.reduce((sum, g) => sum + (g.sizeOnDisk || 0), 0);
+    if (drive && needed > 0) {
       const capacity = el.optFormat.checked ? drive.totalBytes : drive.freeBytes;
-      if (selectedGame.sizeOnDisk > 0 && selectedGame.sizeOnDisk > capacity) {
-        hint = `Not enough space: needs ${formatBytes(selectedGame.sizeOnDisk)}, has ${formatBytes(capacity)}.`;
+      if (needed > capacity) {
+        hint = `Not enough space: needs ${formatBytes(needed)}, has ${formatBytes(capacity)}.`;
       }
     }
   }
   el.optCopyHint.textContent = hint;
+
+  // A format discards the whole volume on its way past, so a TRIM afterwards
+  // would be a permission prompt to do nothing.
+  el.optTrimRow.hidden = el.optFormat.checked;
+  if (el.optFormat.checked) el.optTrim.checked = false;
+
+  el.optTuneRow.hidden = platform !== "windows";
+  if (platform !== "windows") el.optTune.checked = false;
 
   refreshExePicker();
 }
@@ -472,8 +626,14 @@ function refreshOptions() {
  * already identifies the game wherever the library lives.
  */
 async function refreshExePicker() {
+  // Only for a single non-Steam game. A collection would need one dropdown per
+  // game, so each game's program is picked by the ranking in portable.rs.
   const needed =
-    el.optCopy.checked && !manualMode && selectedGame && selectedGame.library !== "steam";
+    el.optCopy.checked &&
+    !manualMode &&
+    !isBundleMode() &&
+    selectedGame &&
+    selectedGame.library !== "steam";
 
   el.exePick.hidden = !needed;
   if (!needed) {
@@ -533,8 +693,25 @@ function refreshFormatFields() {
       : "Choose a drive first.";
   }
 
-  if (!el.formatLabel.value) {
-    el.formatLabel.value = defaultLabel(intent()?.title ?? "");
+  const filesystem = el.formatFilesystem.value;
+  el.filesystemHint.textContent =
+    filesystem === "btrfs"
+      ? "Windows cannot read btrfs without WinBtrfs installed, so this cartridge will only open on machines that have it. Choose exFAT if it is going anywhere."
+      : "Readable on Windows, Linux and macOS with nothing to install. This is what a cartridge you hand to someone should be.";
+
+  // The name field follows the filesystem: exFAT allows 11 characters, btrfs
+  // has room for the whole title.
+  const limit = filesystem === "btrfs" ? 64 : 11;
+  el.formatLabel.maxLength = limit;
+  el.labelHint.textContent = `Up to ${limit} characters on ${formatFilesystemLabel(filesystem)}.`;
+
+  if (!el.formatLabel.value || labelIsOurs) {
+    el.formatLabel.value = defaultLabel(intent()?.title ?? "", filesystem);
+    labelIsOurs = true;
+  } else if (el.formatLabel.value.length > limit) {
+    // Switching to the stricter filesystem must not leave a name it will
+    // refuse in a field the user can no longer see the end of.
+    el.formatLabel.value = el.formatLabel.value.slice(0, limit).trim();
   }
 }
 
@@ -542,15 +719,15 @@ function formatFilesystemLabel(filesystem) {
   return filesystem === "exfat" ? "exFAT" : "btrfs";
 }
 
-/** Mirrors create.rs's default_label so the field starts where it would. */
-function defaultLabel(title) {
+/** Mirrors create.rs's default_label_for so the field starts where it would. */
+function defaultLabel(title, filesystem) {
+  const limit = filesystem === "btrfs" ? 64 : 11;
   const cleaned = title
     .replace(/[^A-Za-z0-9]+/g, " ")
     .trim()
-    .slice(0, 11)
-    .trim()
-    .toUpperCase();
-  return cleaned || "CARTRIDGE";
+    .slice(0, limit)
+    .trim();
+  return cleaned || "Cartridge";
 }
 
 /* -------------------------------------------------------------- SteamGridDB */
@@ -732,7 +909,11 @@ function refreshCreateButton() {
       (sum, g) => sum + (g.sizeOnDisk || 0),
       0,
     );
-    const noSpace = drive && totalSize > 0 && totalSize > drive.freeBytes;
+    // A collection that only points at installed games is a few kilobytes;
+    // space is only a question once the files are going across too.
+    const capacity = el.optFormat.checked ? drive?.totalBytes : drive?.freeBytes;
+    const noSpace =
+      el.optCopy.checked && drive && totalSize > 0 && totalSize > capacity;
     let ok = hasTitle && Boolean(selectedDrive) && !noSpace;
     if (ok && el.optFormat.checked) {
       const typed = el.formatConfirm.value.trim();
@@ -817,11 +998,16 @@ async function writeCartridge() {
         formatFilesystem: el.formatFilesystem.value,
         formatLabel: el.formatLabel.value.trim() || null,
         formatConfirmation: el.formatConfirm.value.trim() || null,
+        copyGame: el.optCopy.checked,
+        trimAfterWrite: el.optTrim.checked,
+        collectionCoverSource: collectionCover?.path ?? null,
         games: bundleList.map((g) => ({
           title: g.name,
           executable: g.executable,
           appId: g.library === "steam" ? g.id : null,
           playniteId: g.library === "playnite" ? g.id : null,
+          // Left for the backend to work out from the ids, the same way a
+          // single game's art is found.
           coverSource: null,
         })),
       };
@@ -839,6 +1025,7 @@ async function writeCartridge() {
         formatConfirmation: el.formatConfirm.value.trim() || null,
         copyGame: el.optCopy.checked,
         copyExecutable: el.exePick.hidden ? null : el.exeChoices.value || null,
+        trimAfterWrite: el.optTrim.checked,
       };
     }
 
@@ -859,9 +1046,14 @@ async function writeCartridge() {
       );
     }
     if (result.registeredWithSteam) parts.push("Registered with Steam.");
+    if (result.trim) parts.push(result.trim);
     if (result.coverWritten) parts.push("Cover art copied.");
     if (result.icon) parts.push("Drive icon set.");
     parts.push(...(result.warnings ?? []));
+
+    if (el.optTune.checked && platform === "windows") {
+      parts.push(...(await runTuning(true)));
+    }
 
     status(parts.join(" "), result.warnings?.length ? "" : "good");
     showProgress(false);
@@ -876,6 +1068,46 @@ async function writeCartridge() {
     building = false;
     el.rescan.disabled = false;
     refreshCreateButton();
+  }
+}
+
+/* ----------------------------------------------------------------- tuning */
+
+/**
+ * Apply or undo the Windows settings for the chosen drive.
+ *
+ * Returns sentences to add to the status line. A failure here never fails the
+ * cartridge — it is already written by this point.
+ */
+async function runTuning(applying) {
+  try {
+    const done = await invoke("apply_tuning", {
+      drivePath: selectedDrive,
+      tweaks: TWEAKS,
+      applying,
+    });
+    if (applying) el.btnTuneUndo.hidden = false;
+    return done;
+  } catch (error) {
+    return [String(error)];
+  }
+}
+
+/** Show exactly what would run, before anything is elevated. */
+async function showTuningCommands() {
+  if (!selectedDrive) {
+    status("Choose the cartridge first, so the commands name the right drive.");
+    return;
+  }
+  try {
+    const commands = await invoke("tuning_plan", {
+      drivePath: selectedDrive,
+      tweaks: TWEAKS,
+      applying: true,
+    });
+    status(`These run as administrator, one prompt each: ${commands.join("  ·  ")}`);
+  } catch (error) {
+    status(String(error), "error");
   }
 }
 
@@ -944,7 +1176,45 @@ el.customTitle.addEventListener("input", () => {
   if (el.optFormat.checked && !el.formatLabel.value) refreshFormatFields();
 });
 el.customExec.addEventListener("input", refreshCreateButton);
-el.collectionTitle.addEventListener("input", refreshCreateButton);
+el.collectionTitle.addEventListener("input", () => {
+  refreshCreateButton();
+  refreshCollectionPreview();
+});
+el.btnTuneCommands.addEventListener("click", showTuningCommands);
+el.btnTuneUndo.addEventListener("click", async () => {
+  el.btnTuneUndo.disabled = true;
+  const said = await runTuning(false);
+  status(said.join(" "));
+  el.btnTuneUndo.hidden = true;
+  el.btnTuneUndo.disabled = false;
+});
+el.btnSettings.addEventListener("click", openSettings);
+el.settingsSave.addEventListener("click", saveSettings);
+el.setSgdb.addEventListener("change", () => {
+  el.sgdbKeyField.hidden = !el.setSgdb.checked;
+});
+el.btnCollectionCover.addEventListener("click", async () => {
+  el.btnCollectionCover.disabled = true;
+  try {
+    const picked = await invoke("pick_cover_image");
+    if (picked) {
+      collectionCover = picked;
+      el.btnCollectionCoverClear.hidden = false;
+      el.btnCollectionCover.querySelector(".btn__label").textContent = "Change artwork…";
+      refreshCollectionPreview();
+    }
+  } catch (error) {
+    status(String(error), "error");
+  } finally {
+    el.btnCollectionCover.disabled = false;
+  }
+});
+el.btnCollectionCoverClear.addEventListener("click", () => {
+  collectionCover = null;
+  el.btnCollectionCoverClear.hidden = true;
+  el.btnCollectionCover.querySelector(".btn__label").textContent = "Choose artwork…";
+  refreshCollectionPreview();
+});
 el.optCopy.addEventListener("change", () => {
   refreshExePicker();
   refreshCreateButton();
@@ -955,9 +1225,17 @@ el.optFormat.addEventListener("change", () => {
   refreshOptions();
   refreshCreateButton();
 });
-el.formatFilesystem.addEventListener("change", refreshCreateButton);
+el.formatFilesystem.addEventListener("change", () => {
+  refreshFormatFields();
+  refreshCreateButton();
+});
+
 el.formatConfirm.addEventListener("input", refreshCreateButton);
-el.formatLabel.addEventListener("input", refreshCreateButton);
+el.formatLabel.addEventListener("input", () => {
+  // Once it has been typed in, changing the filesystem must not overwrite it.
+  labelIsOurs = false;
+  refreshCreateButton();
+});
 el.create.addEventListener("click", writeCartridge);
 el.rescan.addEventListener("click", async () => {
   status("Rescanning…");
@@ -1001,7 +1279,12 @@ async function start() {
   if (tauri?.event) {
     tauri.event.listen("cartridge://progress", (event) => onProgress(event.payload));
   }
-  await Promise.all([loadGames(), loadDrives()]);
+  try {
+    platform = await invoke("host_platform");
+  } catch {
+    platform = "";
+  }
+  await Promise.all([loadSettings(), loadGames(), loadDrives()]);
   refreshOptions();
   if (tauri?.window) await tauri.window.getCurrentWindow().show();
 }
@@ -1038,6 +1321,38 @@ async function demoInvoke(command, args) {
           sizeOnDisk: 1_006_632_960, hasCover: false,
           executable: "steam://rungameid/413150", canCopy: true },
       ];
+    case "get_settings":
+      // The preview mirrors a fresh install: offline until switched on.
+      return { steamgriddbEnabled: false, steamgriddbApiKey: "" };
+    case "set_settings":
+      return args.settings;
+    case "suggest_collection_name": {
+      // Mirrors create.rs closely enough for the preview: the shared opening
+      // words, or a count.
+      const words = args.titles.map((t) => t.trim().split(/\s+/));
+      const shared = [];
+      for (let i = 0; i < words[0].length; i += 1) {
+        const word = words[0][i];
+        if (!words.every((w) => w[i]?.toLowerCase() === word.toLowerCase())) break;
+        shared.push(word);
+      }
+      return shared.length >= 2
+        ? `${shared.join(" ")} Collection`
+        : `${args.titles[0]} and ${args.titles.length - 1} more`;
+    }
+    case "host_platform":
+      return "linux";
+    case "tuning_plan":
+      return [
+        "Add-MpPreference -ExclusionPath 'D:\\'",
+        "Get-CimInstance -ClassName Win32_Volume -Filter \"DriveLetter='D:'\" | Set-CimInstance -Property @{IndexingEnabled=$false}",
+      ];
+    case "apply_tuning":
+      return args.applying
+        ? ["Excluded the cartridge from Defender scanning.", "Search indexing switched off for the cartridge."]
+        : ["Defender scans the cartridge again.", "Search indexing switched back on."];
+    case "pick_cover_image":
+      return { path: "/home/harry/Pictures/collection.jpg", preview: "src/demo/cover.jpg" };
     case "game_cover":
       return args.id === "367520" ? "src/demo/cover.jpg" : "";
     case "sgdb_last_used_artwork":
@@ -1098,7 +1413,7 @@ async function demoInvoke(command, args) {
         autorunWritten: true,
         icon: null,
         formatted: args.request.formatDrive,
-        formattedFilesystem: args.request.formatFilesystem || "btrfs",
+        formattedFilesystem: args.request.formatFilesystem || "exfat",
         gameCopied: args.request.copyGame,
         bytesCopied: args.request.copyGame ? 9_106_886_656 : 0,
         registeredWithSteam: args.request.copyGame && Boolean(args.request.appId),

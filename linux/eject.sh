@@ -1,5 +1,5 @@
 #!/bin/bash
-# PC Cartridge System - Safe Eject Helper
+# PC GamePak - Safe Eject Helper
 # Usage: eject.sh <device>
 # Example: eject.sh sdb
 #

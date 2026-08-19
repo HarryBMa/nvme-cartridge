@@ -1,4 +1,4 @@
-//! Formatting a drive to btrfs or exFAT.
+//! Formatting a drive to exFAT or btrfs.
 //!
 //! This is the only code in the project that destroys data, so it is built to
 //! refuse rather than to succeed. Four things must all hold before a single
@@ -10,10 +10,20 @@
 //!   3. the caller echoed the drive's current label back exactly;
 //!   4. formatting was explicitly asked for, per cartridge. It is never implied.
 //!
-//! btrfs stays the default because it supports TRIM (discard=async mount option)
-//! and transparent zstd compression, which meaningfully improve the lifespan and
-//! effective capacity of NVMe drives. exFAT remains available for broader
-//! removable-media compatibility.
+//! **exFAT is the default**, because the point of a cartridge is that it works
+//! in whatever machine it is plugged into: Windows, Linux and macOS all read it
+//! with no driver to install.
+//!
+//! btrfs is offered for people who want it — it brings TRIM (`discard=async`)
+//! and transparent zstd compression — but it is a deliberate choice, not a
+//! default. Windows cannot read btrfs without [WinBtrfs], a third-party kernel
+//! driver, and a cartridge that needs a driver installed first is not really a
+//! cartridge. The two headline benefits are also thinner than they look here: a
+//! USB bridge only passes TRIM through when it speaks UASP and honours UNMAP,
+//! and game data is already compressed, so zstd buys single-digit percentages
+//! for CPU on every read.
+//!
+//! [WinBtrfs]: https://github.com/maharmstone/btrfs
 
 use std::path::Path;
 use std::process::Command;
@@ -23,21 +33,26 @@ use crate::drives;
 const BTRFS_MAX_LABEL: usize = 256;
 const EXFAT_MAX_LABEL: usize = 11;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// Allocation unit for a cartridge's exFAT filesystem.
+///
+/// A cartridge holds a few enormous files, not many small ones, so the largest
+/// practical cluster is the right trade: fewer allocation-table lookups per
+/// gigabyte read, and a fragmentation pattern that stays sequential. The cost —
+/// up to 128 KB wasted per file — is nothing against a 60 GB game. Left to
+/// itself mkfs.exfat picks by volume size and lands lower on a 128 GB drive.
+const EXFAT_CLUSTER_BYTES: &str = "128K";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Filesystem {
-    Btrfs,
+    #[default]
     Exfat,
-}
-
-impl Default for Filesystem {
-    fn default() -> Self {
-        Self::Btrfs
-    }
+    Btrfs,
 }
 
 impl Filesystem {
-    fn label_limit(self) -> usize {
+    /// Longest volume label this filesystem will take.
+    pub fn label_limit(self) -> usize {
         match self {
             Self::Btrfs => BTRFS_MAX_LABEL,
             Self::Exfat => EXFAT_MAX_LABEL,
@@ -89,7 +104,7 @@ impl std::fmt::Display for FormatError {
             FormatError::ToolMissing(t) => write!(
                 f,
                 "{t} is not installed, so the drive cannot be formatted here. \
-                 Format it to btrfs yourself and run the wizard again."
+                 Format it yourself and run the wizard again."
             ),
             FormatError::Failed(m) => write!(f, "Formatting failed: {m}"),
         }
@@ -125,9 +140,12 @@ pub fn check_label_for(filesystem: Filesystem, label: &str) -> Result<String, Fo
     Ok(trimmed.to_string())
 }
 
-/// Validate a proposed btrfs volume label.
+/// Validate a proposed volume label against the default filesystem.
+///
+/// That is exFAT, whose 11-character limit is the strict one, so a label this
+/// accepts is usable whichever filesystem the cartridge ends up with.
 pub fn check_label(label: &str) -> Result<String, FormatError> {
-    check_label_for(Filesystem::Btrfs, label)
+    check_label_for(Filesystem::default(), label)
 }
 
 /// Describe what formatting `path` would destroy, refusing anything ineligible.
@@ -256,14 +274,25 @@ fn run_format(plan: &FormatPlan, filesystem: Filesystem, label: &str) -> Result<
 
     // Format-Volume needs administrator, so it is elevated on its own rather
     // than requiring the whole wizard to run as admin.
-    // WinBtrfs (https://github.com/maharmstone/btrfs) must be installed.
+    //
+    // exFAT is built into Windows. btrfs is not: it needs WinBtrfs
+    // (https://github.com/maharmstone/btrfs) installed first, which is why it
+    // is an option here rather than the default.
+    // exFAT gets the same 128 KB allocation unit the Linux path asks for, so a
+    // cartridge is laid out identically whichever machine made it. btrfs has no
+    // equivalent knob here and takes its own default.
+    let allocation = match filesystem {
+        Filesystem::Exfat => " -AllocationUnitSize 131072",
+        Filesystem::Btrfs => "",
+    };
     let script = format!(
         "$ErrorActionPreference='Stop'; \
-         Format-Volume -DriveLetter {} -FileSystem {} -NewFileSystemLabel '{}' \
+         Format-Volume -DriveLetter {} -FileSystem {} -NewFileSystemLabel '{}'{} \
          -Confirm:$false -Force",
         letter.trim_end_matches(':'),
         filesystem.display_name(),
-        label.replace('\'', "''")
+        label.replace('\'', "''"),
+        allocation
     );
 
     let status = Command::new("powershell.exe")
@@ -351,6 +380,8 @@ pub fn mkfs_command(
             ],
             Filesystem::Exfat => vec![
                 "mkfs.exfat".to_string(),
+                "-c".to_string(),
+                EXFAT_CLUSTER_BYTES.to_string(),
                 "-n".to_string(),
                 label.to_string(),
                 device.to_string(),
@@ -365,10 +396,22 @@ mod tests {
 
     #[test]
     fn accepts_sensible_labels_and_preserves_case() {
-        assert_eq!(check_label_for(Filesystem::Btrfs, "cinder").unwrap(), "cinder");
-        assert_eq!(check_label_for(Filesystem::Btrfs, "  Hollow ").unwrap(), "Hollow");
-        assert_eq!(check_label_for(Filesystem::Exfat, "CART_01").unwrap(), "CART_01");
-        assert_eq!(check_label_for(Filesystem::Exfat, "MY CART").unwrap(), "MY CART");
+        assert_eq!(
+            check_label_for(Filesystem::Btrfs, "cinder").unwrap(),
+            "cinder"
+        );
+        assert_eq!(
+            check_label_for(Filesystem::Btrfs, "  Hollow ").unwrap(),
+            "Hollow"
+        );
+        assert_eq!(
+            check_label_for(Filesystem::Exfat, "CART_01").unwrap(),
+            "CART_01"
+        );
+        assert_eq!(
+            check_label_for(Filesystem::Exfat, "MY CART").unwrap(),
+            "MY CART"
+        );
     }
 
     #[test]
@@ -437,7 +480,12 @@ mod tests {
     fn exfat_mkfs_arguments_are_in_the_right_order() {
         let (program, args) = mkfs_command("/dev/sdb1", Filesystem::Exfat, "Cinder");
         assert_eq!(program, "pkexec");
-        assert_eq!(args, vec!["mkfs.exfat", "-n", "Cinder", "/dev/sdb1"]);
+        // The cluster size is set rather than left to mkfs, which picks by
+        // volume size and lands lower than a cartridge wants.
+        assert_eq!(
+            args,
+            vec!["mkfs.exfat", "-c", "128K", "-n", "Cinder", "/dev/sdb1"]
+        );
     }
 
     #[test]
@@ -458,5 +506,17 @@ mod tests {
         assert!(text.contains("CINDER"), "{text}");
         // Case matters, so the message has to show both.
         assert!(text.contains("cinder"), "{text}");
+    }
+
+    #[test]
+    fn the_default_filesystem_is_the_one_that_works_everywhere() {
+        // A cartridge is meant to be plugged into whatever is in front of you,
+        // and only exFAT is readable everywhere without installing a driver.
+        assert_eq!(Filesystem::default(), Filesystem::Exfat);
+        // So the default label check is the strict one, and a label that passes
+        // it is usable on either filesystem.
+        assert!(check_label(&"A".repeat(11)).is_ok());
+        assert!(check_label(&"A".repeat(12)).is_err());
+        assert!(check_label_for(Filesystem::Btrfs, &"A".repeat(12)).is_ok());
     }
 }

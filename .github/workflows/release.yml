@@ -1,0 +1,121 @@
+name: release
+
+# Tags are the source of truth. Everything downstream — AUR, WinGet, Scoop —
+# keys off the artefacts and checksums this produces, so nothing else needs to
+# know how to build the project.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (for a dry run; no release is published)"
+        required: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: linux build
+    # Deliberately not -latest: the oldest supported runner gives the oldest
+    # glibc, and a binary built against a newer one refuses to start on
+    # anything older.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install webkit2gtk
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev \
+                                  librsvg2-dev libssl-dev libayatana-appindicator3-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tauri-ui/src-tauri
+
+      - name: Build the launcher
+        run: cargo build --release --manifest-path tauri-ui/src-tauri/Cargo.toml
+
+      # The tarball is what someone untars and runs ./linux/install.sh from, and
+      # what the AUR package builds against.
+      - name: Package
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          staging="pc-gamepak-${version}-linux-x86_64"
+          mkdir -p "$staging"
+          cp tauri-ui/src-tauri/target/release/pc-gamepak "$staging/"
+          # The rootless install needs the watcher; the system install ignores it.
+          cargo build --release --manifest-path watcher/Cargo.toml
+          cp watcher/target/release/pc-gamepak-watcher "$staging/"
+          cp -r linux "$staging/"
+          cp gamepak-linux.sh cartridge.conf.example README.md LICENSE "$staging/" 2>/dev/null || true
+          tar -czf "${staging}.tar.gz" "$staging"
+          sha256sum "${staging}.tar.gz" > "${staging}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            pc-gamepak-*-linux-x86_64.tar.gz
+            pc-gamepak-*-linux-x86_64.tar.gz.sha256
+
+  windows:
+    name: windows build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tauri-ui/src-tauri
+
+      - name: Build the launcher
+        run: cargo build --release --manifest-path tauri-ui/src-tauri/Cargo.toml
+      - name: Build the watcher
+        run: cargo build --release --manifest-path watcher/Cargo.toml
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = "${env:GITHUB_REF_NAME}" -replace '^v', ''
+          $staging = "pc-gamepak-$version-windows-x86_64"
+          New-Item -ItemType Directory -Path $staging | Out-Null
+          Copy-Item tauri-ui/src-tauri/target/release/pc-gamepak.exe $staging
+          Copy-Item watcher/target/release/pc-gamepak-watcher.exe $staging
+          Copy-Item -Recurse windows $staging
+          Copy-Item gamepak-windows.ps1, cartridge.conf.example, README.md, LICENSE $staging
+          Compress-Archive -Path $staging -DestinationPath "$staging.zip"
+          (Get-FileHash "$staging.zip" -Algorithm SHA256).Hash.ToLower() + "  $staging.zip" |
+            Out-File -Encoding ascii "$staging.zip.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            pc-gamepak-*-windows-x86_64.zip
+            pc-gamepak-*-windows-x86_64.zip.sha256
+
+  publish:
+    name: publish the release
+    # A dry run builds both sides and stops there; only a tag publishes.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --draft \
+            artifacts/*/*

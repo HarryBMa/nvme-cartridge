@@ -150,6 +150,19 @@
   list-style: none;
 }
 
+/* A game row carries its add-to-collection button beside it, not beneath it. */
+#games li {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  padding-right: 8px;
+}
+
+#games li .row {
+  flex: 1;
+  min-width: 0;
+}
+
 .row {
   display: flex;
   align-items: baseline;
@@ -563,7 +576,8 @@ li:last-child .row {
 
 /* --- SteamGridDB dialog --------------------------------------------------- */
 
-#sgdb-dialog {
+#sgdb-dialog,
+#settings-dialog {
   width: min(720px, 90vw);
   border: 1px solid var(--hairline-soft);
   border-radius: 8px;
@@ -572,15 +586,37 @@ li:last-child .row {
   background: linear-gradient(200deg, var(--panel) 0%, var(--shell) 100%);
 }
 
-#sgdb-dialog::backdrop {
+#sgdb-dialog::backdrop,
+#settings-dialog::backdrop {
   background: oklch(0 0 0 / 0.6);
 }
 
-#sgdb-form {
+#sgdb-form,
+#settings-form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   padding: 14px;
+}
+
+#settings-dialog {
+  width: min(560px, 90vw);
+}
+
+/* The key only matters once the lookup is on, so it moves with the toggle. */
+#sgdb-key-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 26px;
+}
+
+#sgdb-key-field[hidden] {
+  display: none;
+}
+
+#settings-status:empty {
+  display: none;
 }
 
 .sgdb-head {

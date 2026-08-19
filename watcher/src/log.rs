@@ -1,7 +1,8 @@
 //! A log for the watcher.
 //!
-//! The watcher runs under `windows_subsystem = "windows"`, so it has no console
-//! and every `println!` goes nowhere. When it fails to fire there is otherwise
+//! The watcher runs under `windows_subsystem = "windows"`, and on Linux as a
+//! systemd user service, so it has no console either way and every `println!`
+//! goes nowhere. When it fails to fire there is otherwise
 //! no way to find out why — the process is alive, silent, and doing nothing
 //! visible. This writes the few lines that answer "why didn't my cartridge open
 //! the launcher?".
@@ -16,11 +17,25 @@ use std::path::PathBuf;
 /// grow an unbounded file.
 const MAX_BYTES: u64 = 256 * 1024;
 
-/// `%LOCALAPPDATA%\PC-Cartridge-System\watcher.log`, matching where the
+/// `%LOCALAPPDATA%\PC-GamePak\watcher.log`, matching where the
 /// installer puts everything else.
+#[cfg(windows)]
 fn log_path() -> Option<PathBuf> {
     let base = std::env::var_os("LOCALAPPDATA")?;
-    let dir = PathBuf::from(base).join("PC-Cartridge-System");
+    let dir = PathBuf::from(base).join("PC-GamePak");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir.join("watcher.log"))
+}
+
+/// `~/.local/state/pc-gamepak/watcher.log`, beside the log the udev helpers
+/// write, so there is one place to look whichever install this is.
+#[cfg(not(windows))]
+fn log_path() -> Option<PathBuf> {
+    let dir = match std::env::var_os("XDG_STATE_HOME") {
+        Some(state) if !state.is_empty() => PathBuf::from(state),
+        _ => PathBuf::from(std::env::var_os("HOME")?).join(".local/state"),
+    }
+    .join("pc-gamepak");
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir.join("watcher.log"))
 }

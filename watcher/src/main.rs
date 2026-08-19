@@ -1,30 +1,34 @@
-//! Cartridge watcher (Windows).
+//! Cartridge watcher.
 //!
 //! Replaces the resident PowerShell monitor. PowerShell holds the whole .NET
 //! runtime and a WMI subscription open for the entire login session, which costs
 //! tens of megabytes to do nothing. This does the same job by blocking on the
 //! Windows message queue: no polling, no timer, no CPU while idle.
 //!
-//! On Linux none of this is needed — udev is already running as part of the OS
-//! and starts the launcher through a systemd unit, so there is no resident
-//! process at all. See `linux/99-game-cartridge.rules`.
+//! On Linux the system install does not need this at all — udev is already
+//! running as part of the OS and starts the launcher through a systemd unit, so
+//! nothing is resident. See `linux/99-pc-gamepak.rules`.
+//!
+//! The Linux arm here is for the other shape of install: no root, no udev rule,
+//! a systemd *user* service. It blocks in poll() on the mount table instead,
+//! which is what a sandboxed package can do — and, as it happens, fires when the
+//! cartridge is actually readable rather than when the kernel first sees the
+//! partition. See `linux.rs`.
 //!
 //! Flow: volume arrives -> is there a cartridge.conf on it? -> start the
 //! launcher with `--drive X:\` and go back to sleep.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-// Only the Windows arm logs; on other targets the module is compiled but unused.
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg(not(windows))]
+mod linux;
 mod log;
+#[cfg(not(windows))]
+mod mounts;
 
 #[cfg(not(windows))]
 fn main() {
-    eprintln!(
-        "pc-cartridge-watcher is only needed on Windows.\n\
-         On Linux, install the udev rule instead: sudo ./linux/install.sh"
-    );
-    std::process::exit(1);
+    linux::run()
 }
 
 #[cfg(windows)]
@@ -39,6 +43,7 @@ mod windows_watcher {
     use std::os::windows::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
     use std::process::Command;
+    use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -82,15 +87,17 @@ mod windows_watcher {
     }
 
     /// Last time each drive letter was acted on, for debouncing.
-    static mut SEEN: Option<HashMap<char, Instant>> = None;
+    ///
+    /// Behind a Mutex rather than a `static mut`: the message loop is
+    /// single-threaded, so there is no contention to speak of, but a mutable
+    /// reference to a static is undefined behaviour the moment that assumption
+    /// stops holding, and the compiler is right to refuse it.
+    static SEEN: Mutex<Option<HashMap<char, Instant>>> = Mutex::new(None);
 
     pub fn run() {
         crate::log::line("watcher starting");
 
-        // SAFETY: set up before the window exists, so before any message can be
-        // dispatched. The message loop is single-threaded, so SEEN is only ever
-        // touched from this thread.
-        unsafe { SEEN = Some(HashMap::new()) };
+        *SEEN.lock().expect("no other thread to poison it") = Some(HashMap::new());
 
         let class_name = wide("PcCartridgeWatcher");
 
@@ -122,7 +129,7 @@ mod windows_watcher {
             CreateWindowExW(
                 0,
                 class_name.as_ptr(),
-                wide("PC Cartridge Watcher").as_ptr(),
+                wide("PC GamePak Watcher").as_ptr(),
                 WS_OVERLAPPED,
                 0,
                 0,
@@ -194,16 +201,17 @@ mod windows_watcher {
             .collect()
     }
 
-    /// SAFETY: called only from the window procedure, on the single thread that
-    /// initialised SEEN.
-    unsafe fn on_volume_arrived(letter: char) {
+    fn on_volume_arrived(letter: char) {
         let now = Instant::now();
-        let seen = SEEN.as_mut().expect("initialised in run()");
 
-        if let Some(last) = seen.get(&letter) {
-            if now.duration_since(*last) < DEBOUNCE {
-                crate::log::line(&format!("{letter}: ignoring repeat arrival"));
-                return;
+        {
+            let mut guard = SEEN.lock().expect("no other thread to poison it");
+            let seen = guard.get_or_insert_with(HashMap::new);
+            if let Some(last) = seen.get(&letter) {
+                if now.duration_since(*last) < DEBOUNCE {
+                    crate::log::line(&format!("{letter}: ignoring repeat arrival"));
+                    return;
+                }
             }
         }
 
@@ -218,7 +226,12 @@ mod windows_watcher {
             return;
         }
 
-        seen.insert(letter, now);
+        // Recorded only once it is known to be a cartridge, so a plain USB
+        // stick plugged in twice is not debounced into silence.
+        if let Some(seen) = SEEN.lock().expect("no other thread to poison it").as_mut() {
+            seen.insert(letter, now);
+        }
+
         match start_launcher(&root) {
             Ok(()) => crate::log::line(&format!("{letter}: opened the launcher")),
             Err(e) => crate::log::line(&format!("{letter}: could not start the launcher: {e}")),
@@ -247,7 +260,7 @@ mod windows_watcher {
             .ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::NotFound, "no install directory")
             })?
-            .join("pc-cartridge-launcher.exe");
+            .join("pc-gamepak.exe");
 
         Command::new(exe)
             .arg("--drive")

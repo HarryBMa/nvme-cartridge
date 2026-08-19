@@ -133,6 +133,12 @@ body {
   transform: translateY(1px);
 }
 
+/* An author `display` beats the browser's [hidden] rule whatever the
+   specificity, so hiding a button has to be spelled out. */
+.btn[hidden] {
+  display: none;
+}
+
 .btn__key {
   font-family: "Spline Sans Mono", ui-monospace, monospace;
   font-size: 9.5px;

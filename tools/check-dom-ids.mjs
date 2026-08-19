@@ -15,8 +15,8 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..")
 
 /** Which script drives which page. */
 const PAGES = [
-  { html: "tauri-ui/index.html", scripts: ["tauri-ui/src/main.js"] },
-  { html: "tauri-ui/create.html", scripts: ["tauri-ui/src/create.js"] },
+  { html: "tauri-ui/app/index.html", scripts: ["tauri-ui/app/src/main.js"] },
+  { html: "tauri-ui/app/create.html", scripts: ["tauri-ui/app/src/create.js"] },
 ];
 
 const idsIn = (html) =>

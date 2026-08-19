@@ -1,10 +1,10 @@
-# PC Cartridge System Uninstaller
+# PC GamePak Uninstaller
 
 $ErrorActionPreference = "Stop"
 
 
 Write-Host ""
-Write-Host "Uninstalling PC Cartridge System..."
+Write-Host "Uninstalling PC GamePak..."
 Write-Host ""
 
 
@@ -14,13 +14,13 @@ Write-Host ""
 
 $InstallFolders = @(
     (Join-Path $env:LOCALAPPDATA "SteamGameCartridge")
-    (Join-Path $env:LOCALAPPDATA "PC-Cartridge-System")
+    (Join-Path $env:LOCALAPPDATA "PC-GamePak")
 )
 
 $TaskNames = @(
     "Steam Game Cartridge Monitor",
-    "PC Cartridge System Monitor",
-    "PC Cartridge System Watcher"
+    "PC GamePak Monitor",
+    "PC GamePak Watcher"
 )
 
 
@@ -58,7 +58,7 @@ foreach ($TaskName in $TaskNames) {
 
 Write-Host "Stopping the watcher..."
 
-Get-Process -Name "pc-cartridge-watcher" -ErrorAction SilentlyContinue |
+Get-Process -Name "pc-gamepak-watcher" -ErrorAction SilentlyContinue |
     Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 400
 
@@ -85,6 +85,6 @@ foreach ($InstallFolder in $InstallFolders) {
 
 Write-Host ""
 Write-Host "=========================================="
-Write-Host " PC Cartridge System removed"
+Write-Host " PC GamePak removed"
 Write-Host "=========================================="
 Write-Host ""

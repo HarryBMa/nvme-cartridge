@@ -10,6 +10,14 @@
   <main id="shell">
     <header id="bar" data-tauri-drag-region>
       <p class="eyebrow" data-tauri-drag-region>Create cartridge</p>
+      <button id="btn-settings" class="icon-btn" type="button" aria-label="Settings"
+              title="Settings" aria-haspopup="dialog">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round" width="15" height="15">
+          <circle cx="12" cy="12" r="3.1" />
+          <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.56V21a2 2 0 1 1-4 0v-.11a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1H3a2 2 0 1 1 0-4h.11a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.56V3a2 2 0 1 1 4 0v.11a1.7 1.7 0 0 0 1 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.56 1H21a2 2 0 1 1 0 4h-.11a1.7 1.7 0 0 0-1.49 1z" />
+        </svg>
+      </button>
       <button id="btn-close" class="icon-btn" type="button" aria-label="Close" title="Close — Esc">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"
              stroke-linecap="round" width="16" height="16">
@@ -21,7 +29,7 @@
     <div id="columns">
       <!-- Step 1 ------------------------------------------------------- -->
       <section id="pick-game" aria-labelledby="step-game">
-        <h2 class="step" id="step-game"><span class="step__n">1</span> Choose a game</h2>
+        <h2 class="step" id="step-game"><span class="step__n">1</span> Choose the games</h2>
 
         <input id="search" type="search" placeholder="Search your library…"
                autocomplete="off" spellcheck="false" aria-label="Search games" />
@@ -63,6 +71,14 @@
               <input id="collection-title" type="text" placeholder="God of War Collection"
                      autocomplete="off" />
             </label>
+            <div id="collection-art">
+              <button id="btn-collection-cover" class="btn btn--ghost btn--tiny" type="button">
+                <span class="btn__label">Choose artwork…</span>
+              </button>
+              <button id="btn-collection-cover-clear" class="link" type="button" hidden>
+                Use the first game's art instead
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -75,7 +91,7 @@
             <div id="preview-empty" aria-hidden="true"><span>NO&nbsp;ART</span></div>
           </div>
           <div id="preview-meta">
-            <p class="eyebrow">Selected</p>
+            <p class="eyebrow" id="preview-eyebrow">Selected</p>
             <h3 id="preview-title">Nothing yet</h3>
             <p id="preview-sub" class="mono"></p>
             <p id="preview-source" class="field__hint" hidden>From SteamGridDB</p>
@@ -122,7 +138,7 @@
           <label class="opt">
             <input id="opt-copy" type="checkbox" />
             <span class="opt__body">
-              <span class="opt__label">Copy the game onto the cartridge</span>
+              <span class="opt__label" id="opt-copy-label">Copy the game onto the cartridge</span>
               <span class="opt__hint" id="opt-copy-hint">
                 Also registers the drive as a Steam library, so Steam plays from
                 the cartridge instead of your internal copy.
@@ -138,11 +154,39 @@
             <p class="field__hint" id="exe-hint"></p>
           </div>
 
+          <label class="opt" id="opt-trim-row" hidden>
+            <input id="opt-trim" type="checkbox" />
+            <span class="opt__body">
+              <span class="opt__label">Release freed space back to the drive</span>
+              <span class="opt__hint">
+                Deleting files frees them in the filesystem, but the drive keeps
+                treating those blocks as used until something tells it otherwise —
+                and nothing sends TRIM to removable media on a schedule. Needs the
+                same permission prompt formatting does.
+              </span>
+            </span>
+          </label>
+
+          <label class="opt" id="opt-tune-row" hidden>
+            <input id="opt-tune" type="checkbox" />
+            <span class="opt__body">
+              <span class="opt__label">Tune Windows for this cartridge</span>
+              <span class="opt__hint">
+                Excludes the cartridge from Defender's real-time scanning and turns
+                off Search indexing for it — both of which otherwise crawl a freshly
+                copied 60&nbsp;GB game. Asks for administrator once per setting, and
+                can be undone.
+                <button id="btn-tune-commands" class="link" type="button">Show the commands</button>
+                <button id="btn-tune-undo" class="link" type="button" hidden>Undo them</button>
+              </span>
+            </span>
+          </label>
+
           <label class="opt opt--danger">
             <input id="opt-format" type="checkbox" />
             <span class="opt__body">
               <span class="opt__label">Format the drive first</span>
-              <span class="opt__hint">Erases everything on the drive. Choose btrfs or exFAT below.</span>
+              <span class="opt__hint">Erases everything on the drive. Choose exFAT or btrfs below.</span>
             </span>
           </label>
 
@@ -150,15 +194,17 @@
             <label class="field">
               <span class="field__label">Filesystem</span>
               <select id="format-filesystem">
-                <option value="btrfs">btrfs (best for NVMe cartridges)</option>
-                <option value="exfat">exFAT (best for broad removable-media compatibility)</option>
+                <option value="exfat" selected>exFAT — reads anywhere, no driver</option>
+                <option value="btrfs">btrfs — TRIM and compression, Linux only unless WinBtrfs is installed</option>
               </select>
             </label>
+            <p class="field__hint" id="filesystem-hint"></p>
             <label class="field">
               <span class="field__label">New drive name</span>
               <input id="format-label" type="text" maxlength="11" autocomplete="off"
                      spellcheck="false" />
             </label>
+            <p class="field__hint" id="label-hint"></p>
             <label class="field">
               <span class="field__label" id="confirm-label">Type the current name to confirm</span>
               <input id="format-confirm" type="text" autocomplete="off" spellcheck="false"
@@ -186,6 +232,49 @@
       </section>
     </div>
   </main>
+
+  <dialog id="settings-dialog">
+    <form id="settings-form" method="dialog">
+      <header class="sgdb-head">
+        <h3>Settings</h3>
+        <button id="settings-close" class="icon-btn" type="submit" value="cancel"
+                aria-label="Close">✕</button>
+      </header>
+
+      <label class="opt">
+        <input id="set-sgdb" type="checkbox" />
+        <span class="opt__body">
+          <span class="opt__label">Look artwork up on SteamGridDB</span>
+          <span class="opt__hint">
+            Off by default. Everything else in the wizard works with no network
+            at all — game lists and cover art come from what Steam and Playnite
+            have already cached. Turning this on lets the wizard fetch artwork
+            for games whose art is missing or poor.
+          </span>
+        </span>
+      </label>
+
+      <div id="sgdb-key-field" hidden>
+        <label class="field">
+          <span class="field__label">SteamGridDB API key</span>
+          <input id="set-sgdb-key" type="password" autocomplete="off" spellcheck="false"
+                 placeholder="Paste your key" />
+        </label>
+        <p class="field__hint">
+          Their API refuses unauthenticated requests, so the lookup does nothing
+          without a key. Generate one under your SteamGridDB profile preferences.
+          It is stored on this machine only, next to the artwork cache.
+        </p>
+      </div>
+
+      <footer class="sgdb-actions">
+        <button id="settings-save" class="btn btn--primary" type="button">
+          <span class="btn__label">Save</span>
+        </button>
+      </footer>
+      <p id="settings-status" class="field__hint" role="status" aria-live="polite"></p>
+    </form>
+  </dialog>
 
   <dialog id="sgdb-dialog">
     <form id="sgdb-form" method="dialog">

@@ -1,4 +1,4 @@
-# PC Cartridge System - Safe Eject Helper
+# PC GamePak - Safe Eject Helper
 # Usage: eject.ps1 [-DriveLetter X]
 # Safely unmounts a drive volume and flushes write caches before physical removal.
 
@@ -86,7 +86,7 @@ function Invoke-SafeEject {
 if ([string]::IsNullOrWhiteSpace($DriveLetter)) {
 
     Write-Host ""
-    Write-Host "  Safely eject a PC Cartridge" -ForegroundColor Cyan
+    Write-Host "  Safely eject a PC GamePak cartridge" -ForegroundColor Cyan
     Write-Host ""
 
     $DriveLetter = Read-Host "  Enter drive letter to eject (e.g. D)"

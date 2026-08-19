@@ -1,9 +1,9 @@
-// PC Cartridge Launcher — Tauri 2.0 backend
+// PC GamePak — Tauri 2.0 backend
 //
 // One binary, two modes, chosen by the arguments it was started with:
 //
-//   pc-cartridge-launcher --drive <path>    the popup, opened on insert
-//   pc-cartridge-launcher --create          the create-cartridge wizard
+//   pc-gamepak --drive <path>    the popup, opened on insert
+//   pc-gamepak --create          the create-cartridge wizard
 //
 // Exactly one window is built, so the wizard costs nothing when a cartridge is
 // inserted and the popup costs nothing while making one.
@@ -13,9 +13,17 @@
 //   parse_cartridge(drive_path)              -> CartridgeInfo (cover included)
 //   launch_game(executable, drive_path)      -> ()
 //   eject_drive(drive_path)                  -> ()
+//   cartridge_health(drive_path)             -> Health
 //
 // Wizard commands:
 //   list_games()                             -> Vec<GameInfo>  (Playnite + Steam)
+//   get_settings()                           -> Settings
+//   set_settings(settings)                   -> Settings
+//   suggest_collection_name(titles)          -> String
+//   pick_cover_image()                       -> PickedCover | null
+//   host_platform()                          -> "windows" | "linux" | …
+//   tuning_plan(drive_path, tweaks, applying) -> Vec<String>  (the commands)
+//   apply_tuning(drive_path, tweaks, applying) -> Vec<String>  (what was done)
 //   game_cover(library, id)                  -> String (data URI)
 //   list_target_drives()                     -> Vec<TargetDrive>
 //   format_plan(drive_path)                  -> FormatPlan
@@ -32,14 +40,15 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-// All of the real work lives in cartridge-core, which has no UI dependency and
+// All of the real work lives in gamepak-core, which has no UI dependency and
 // so can be tested without a webview. This file is the Tauri shell around it.
-use cartridge_core::cartridge::{self, CartridgeInfo};
-use cartridge_core::{create, drives, format, sgdb};
+use gamepak_core::cartridge::{self, CartridgeInfo};
+use gamepak_core::{create, drives, format, health, settings, sgdb, tuning};
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::{Emitter, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_dialog::DialogExt;
 
 // --------------------------------------------------------------------------
 // Tauri commands
@@ -309,6 +318,116 @@ fn game_cover(library: create::Library, id: String) -> String {
     create::game_cover(library, &id)
 }
 
+/// What the user has switched on. Read on open, so the wizard can hide what is
+/// off — though the backend refuses either way.
+#[tauri::command]
+fn get_settings() -> settings::Settings {
+    settings::load()
+}
+
+/// Store the settings and hand back what was stored, so the window and the file
+/// cannot drift apart.
+#[tauri::command]
+fn set_settings(settings: settings::Settings) -> Result<settings::Settings, String> {
+    settings::save(&settings)?;
+    Ok(settings)
+}
+
+/// How well this cartridge is actually connected.
+///
+/// Read on demand rather than at startup: on Windows it asks PowerShell, and
+/// the launcher opening half a second slower is worse than the details sheet
+/// filling in half a second late.
+#[tauri::command]
+async fn cartridge_health(drive_path: String) -> health::Health {
+    tauri::async_runtime::spawn_blocking(move || health::inspect(&drive_path))
+        .await
+        .unwrap_or_default()
+}
+
+/// Which OS the wizard is running on, so it can offer only what exists here.
+#[tauri::command]
+fn host_platform() -> &'static str {
+    std::env::consts::OS
+}
+
+/// Which tweaks the window is asking about, by name.
+fn parse_tweaks(names: &[String]) -> Result<Vec<tuning::Tweak>, String> {
+    names
+        .iter()
+        .map(|name| match name.as_str() {
+            "defender" => Ok(tuning::Tweak::DefenderExclusion),
+            "indexing" => Ok(tuning::Tweak::SearchIndexing),
+            other => Err(format!("{other} is not a setting this tool changes")),
+        })
+        .collect()
+}
+
+/// The exact commands a tuning run would execute.
+///
+/// Shown before anything happens: this is elevated and it touches malware
+/// scanning, so the user reads the commands first.
+#[tauri::command]
+fn tuning_plan(
+    drive_path: String,
+    tweaks: Vec<String>,
+    applying: bool,
+) -> Result<Vec<String>, String> {
+    tuning::plan(&drive_path, &parse_tweaks(&tweaks)?, applying)
+}
+
+/// Apply or undo the Windows tuning. Each step elevates on its own.
+#[tauri::command]
+async fn apply_tuning(
+    drive_path: String,
+    tweaks: Vec<String>,
+    applying: bool,
+) -> Result<Vec<String>, String> {
+    let parsed = parse_tweaks(&tweaks)?;
+    tauri::async_runtime::spawn_blocking(move || tuning::apply(&drive_path, &parsed, applying))
+        .await
+        .map_err(|e| format!("the tuning thread failed: {e}"))?
+}
+
+/// A picture the user chose for a collection's artwork.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PickedCover {
+    /// Handed back with the create request, so the file is copied from here.
+    path: String,
+    /// The picture itself, for the wizard's preview. Empty when it is too big
+    /// to inline; the build then refuses it with a proper message.
+    preview: String,
+}
+
+/// Ask for artwork through the desktop's own file dialog.
+///
+/// The window never names a path: it gets one back only after the user has
+/// pointed at a file themselves. This is also the offline way to give a
+/// collection its own art, with no SteamGridDB lookup involved.
+#[tauri::command]
+async fn pick_cover_image(window: tauri::WebviewWindow) -> Option<PickedCover> {
+    let file = window
+        .dialog()
+        .file()
+        .set_title("Choose collection artwork")
+        .add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp"])
+        .blocking_pick_file()?;
+
+    let path = file.into_path().ok()?;
+    Some(PickedCover {
+        preview: sgdb::read_as_data_uri(&path).unwrap_or_default(),
+        path: path.to_string_lossy().into_owned(),
+    })
+}
+
+/// A name for a cartridge carrying several games, worked out from what they are
+/// called. The wizard offers it; the user can always type their own.
+#[tauri::command]
+fn suggest_collection_name(titles: Vec<String>) -> String {
+    create::suggest_collection_name(&titles)
+}
+
 #[tauri::command]
 fn sgdb_search_games(query: String) -> Result<Vec<sgdb::SteamGridGame>, String> {
     sgdb::search_games(&query)
@@ -357,7 +476,7 @@ fn format_plan(drive_path: String) -> Result<format::FormatPlan, String> {
 #[tauri::command]
 fn executable_choices(
     playnite_id: String,
-) -> Result<Vec<cartridge_core::portable::Candidate>, String> {
+) -> Result<Vec<gamepak_core::portable::Candidate>, String> {
     create::executable_choices(&playnite_id)
 }
 
@@ -401,6 +520,7 @@ fn main() {
     let wizard = std::env::args().skip(1).any(|arg| arg == "--create");
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             drive_path,
             parse_cartridge,
@@ -408,6 +528,14 @@ fn main() {
             eject_drive,
             list_games,
             game_cover,
+            get_settings,
+            set_settings,
+            suggest_collection_name,
+            pick_cover_image,
+            cartridge_health,
+            host_platform,
+            tuning_plan,
+            apply_tuning,
             sgdb_search_games,
             sgdb_get_artwork,
             sgdb_download_artwork,
@@ -432,7 +560,7 @@ fn main() {
                     .build()?;
             } else {
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                    .title("PC Cartridge")
+                    .title("PC GamePak")
                     .inner_size(420.0, 560.0)
                     .resizable(false)
                     .decorations(false)

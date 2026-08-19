@@ -1,4 +1,4 @@
-# PC Cartridge Launcher — Tauri UI
+# PC GamePak — Tauri UI
 
 A compact popup that appears when a cartridge is inserted.
 Built with **Tauri 2.0** (Rust backend) and plain HTML/CSS/JS — no framework, no
@@ -41,7 +41,7 @@ The page serves a sample cartridge when it is opened outside Tauri, so the
 window can be worked on without a physical drive:
 
 ```bash
-npx http-server tauri-ui     # → http://localhost:8080/?drive=/demo
+npx http-server tauri-ui/app     # → http://localhost:8080/?drive=/demo
 ```
 
 Append `&state=noexec` to see the case where `cartridge.conf` sets no
@@ -65,12 +65,14 @@ sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev \
 ```bash
 cd tauri-ui
 npm install
-npm run build     # → src-tauri/target/release/pc-cartridge-launcher
+npm run build     # → src-tauri/target/release/pc-gamepak
 npm run dev       # run it against a drive, for development
 ```
 
-There is no bundler: `index.html` and `src/` are shipped as-is, which is why
-`frontendDist` points at this directory.
+There is no bundler: the files in `app/` are shipped as-is, which is why
+`frontendDist` points there. It is a directory of its own rather than the whole
+of `tauri-ui/`, because Tauri embeds everything under `frontendDist` into the
+binary — including, if it were allowed to, `src-tauri/target/`.
 
 ## The create-cartridge wizard
 
@@ -78,7 +80,7 @@ The same binary, started with `--create`, opens the wizard that writes
 cartridges:
 
 ```bash
-pc-cartridge-launcher --create
+pc-gamepak --create
 ```
 
 ![The create-cartridge wizard](../docs/wizard.png)
@@ -98,11 +100,13 @@ partial install cannot play.
 Covers are loaded one at a time as you select a game: base64ing a whole library
 into the webview at once would be tens of megabytes of IPC.
 
-The wizard can also format the cartridge to **btrfs** or **exFAT**, copy a
+The wizard can also format the cartridge to **exFAT** or **btrfs**, copy a
 Steam game onto it and register it in Steam's `libraryfolders.vdf`, and write an
 `autorun.inf` so Explorer shows the game's name instead of "Removable Disk".
-Formatting is opt-in and gated on typing the drive's current name back. btrfs is
-the NVMe-first option; exFAT is there for broader removable-media compatibility.
+Formatting is opt-in and gated on typing the drive's current name back. exFAT is
+the default, because it reads on any machine with no driver to install; btrfs is
+there for enthusiasts who want TRIM and compression and can live with needing
+WinBtrfs on Windows.
 
 ## Icon
 
@@ -128,10 +132,10 @@ only.
 ## When nothing happens
 
 The Windows watcher writes to
-`%LOCALAPPDATA%\PC-Cartridge-System\watcher.log`, which is the first place to
+`%LOCALAPPDATA%\PC-GamePak\watcher.log`, which is the first place to
 look when a cartridge does not open the launcher — it records every volume
 arrival and why each one was or was not acted on. The Linux helper logs to
-`~/.local/state/pc-cartridge-system/helper.log`.
+`~/.local/state/pc-gamepak/helper.log`.
 
 ## How it gets started
 
@@ -139,12 +143,12 @@ The launcher takes the cartridge's mount point on the command line and shows one
 cartridge per window:
 
 ```bash
-pc-cartridge-launcher --drive /run/media/you/CARTRIDGE   # Linux
-pc-cartridge-launcher.exe --drive "D:\"                  # Windows
+pc-gamepak --drive /run/media/you/CARTRIDGE   # Linux
+pc-gamepak.exe --drive "D:\"                  # Windows
 ```
 
 Nothing on the cartridge invokes it. On Linux a udev rule starts
-`linux/cartridge-launcher-helper.sh`, which waits for the automount and then runs
+`linux/gamepak-launcher-helper.sh`, which waits for the automount and then runs
 the launcher; on Windows `watcher/` sees the volume arrive and does the same. See
 the [main README](../README.md) for the full path.
 
@@ -176,13 +180,16 @@ Supported URI schemes: `steam://`, `heroic://`, `gog://`, `epic://`,
 
 ```
 tauri-ui/
-├── index.html                  # Main HTML shell
-├── src/
-│   ├── main.js                 # Frontend logic (Tauri invoke calls)
-│   ├── style.css               # Popup styles
-│   ├── fonts/                  # Bundled woff2 (Archivo, Spline Sans Mono)
-│   └── demo/                   # Sample cover art for browser preview
-├── create.html                 # The create-cartridge wizard
+├── app/                        # everything shipped to the webview
+│   ├── index.html              # Main HTML shell
+│   ├── create.html             # The create-cartridge wizard
+│   └── src/
+│       ├── main.js             # Launcher logic (Tauri invoke calls)
+│       ├── create.js           # Wizard logic
+│       ├── style.css           # Popup styles
+│       ├── create.css          # Wizard styles
+│       ├── fonts/              # Bundled woff2 (Archivo, Spline Sans Mono)
+│       └── demo/               # Sample cover art for browser preview
 ├── src-tauri/
 │   ├── Cargo.toml
 │   ├── build.rs
@@ -197,7 +204,7 @@ tauri-ui/
 └── package.json
 ```
 
-The logic behind those commands lives in the `cartridge-core` crate at `core/`,
+The logic behind those commands lives in the `gamepak-core` crate at `core/`,
 which has no UI dependency so its tests run without a webview:
 
 ```
@@ -207,7 +214,7 @@ core/src/
 ├── steam.rs       Steam manifests and library folders
 ├── steamlib.rs    copy a game, register/unregister with Steam
 ├── drives.rs      which drives may be written to
-├── format.rs      btrfs / exFAT formatting, behind confirmation
+├── format.rs      exFAT / btrfs formatting, behind confirmation
 ├── autorun.rs     autorun.inf, drive name and icon
 └── create.rs      the build pipeline
 ```

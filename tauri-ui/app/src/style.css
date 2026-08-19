@@ -257,6 +257,12 @@
   animation: rise 520ms 380ms var(--ease) both;
 }
 
+/* `display` on an id selector beats the browser's [hidden] rule, so a
+   collection would otherwise keep the single-game Play and a second Eject. */
+#button-row[hidden] {
+  display: none;
+}
+
 /* Primary: the only filled surface in the window. */
 .btn--play {
   flex: 1;
@@ -309,6 +315,30 @@
   border-color: oklch(1 0 0 / 0.08);
 }
 
+/* Connection notes, under the details table. Only present when there is
+   something worth saying about the link, the transport or the free space. */
+#health {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+#health[hidden] {
+  display: none;
+}
+
+.health__note {
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 5px;
+  border-left: 2px solid color-mix(in oklch, var(--accent) 70%, transparent);
+  background: oklch(0.18 0.005 65 / 0.6);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
 /* ==========================================================================
    Details sheet
    ========================================================================== */
@@ -354,9 +384,16 @@
   color: var(--ink-2);
 }
 
+/* The table and the connection notes scroll together; separately they compete
+   for the same space and the last row disappears behind the notes. */
+#sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 #specs {
   margin: 0;
-  overflow-y: auto;
 }
 
 #specs > div {
@@ -404,6 +441,11 @@
 }
 
 #game-list[hidden] {
+  display: none;
+}
+
+/* No art for this game: the frame would just be an empty box. */
+.game-row__cover:not([src]) {
   display: none;
 }
 

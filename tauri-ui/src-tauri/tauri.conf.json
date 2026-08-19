@@ -1,9 +1,9 @@
 {
-  "productName": "PC Cartridge Launcher",
+  "productName": "PC GamePak",
   "version": "0.1.0",
-  "identifier": "com.pc-cartridge.launcher",
+  "identifier": "com.pc-gamepak.launcher",
   "build": {
-    "frontendDist": ".."
+    "frontendDist": "../app"
   },
   "app": {
     "withGlobalTauri": true,

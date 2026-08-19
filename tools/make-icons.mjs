@@ -14,7 +14,7 @@ import fs from "node:fs/promises";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const ICONS = path.join(ROOT, "tauri-ui/src-tauri/icons");
-const FONT = path.join(ROOT, "tauri-ui/src/fonts/archivo-latin-var.woff2");
+const FONT = path.join(ROOT, "tauri-ui/app/src/fonts/archivo-latin-var.woff2");
 
 // The sizes Tauri's bundler expects, plus the ones that go into the .ico.
 const PNGS = [

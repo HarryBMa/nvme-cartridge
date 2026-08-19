@@ -1,0 +1,54 @@
+# Maintainer: HarryBMa <harry.malmgren@gmail.com>
+#
+# Builds from the tagged source. The AUR is the one channel where the system
+# integration this project needs — a udev rule and two systemd units — is
+# ordinary rather than a fight, because pacman installs as root.
+
+pkgname=pc-gamepak
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Turn removable storage into physical game cartridges"
+arch=('x86_64')
+url="https://github.com/HarryBMa/pc-gamepak"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'librsvg' 'exfatprogs' 'polkit')
+optdepends=(
+  'steam: play Steam games from the cartridge'
+  'btrfs-progs: format cartridges to btrfs instead of exFAT'
+)
+makedepends=('rust' 'cargo' 'pkgconf')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')  # replaced at release time by the checksum from the workflow
+
+build() {
+  cd "$srcdir/$pkgname-$pkgver/tauri-ui/src-tauri"
+  cargo build --release --locked
+}
+
+check() {
+  cd "$srcdir/$pkgname-$pkgver/core"
+  cargo test --release --locked
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver"
+
+  install -Dm755 tauri-ui/src-tauri/target/release/pc-gamepak \
+    "$pkgdir/usr/bin/pc-gamepak"
+  install -Dm755 linux/gamepak-launcher-helper.sh "$pkgdir/usr/bin/pc-gamepak-helper"
+  install -Dm755 linux/gamepak-remove-helper.sh "$pkgdir/usr/bin/pc-gamepak-remove"
+  install -Dm755 linux/eject.sh "$pkgdir/usr/bin/pc-gamepak-eject"
+
+  # The units are templates instantiated by udev with the device name.
+  install -Dm644 "linux/pc-gamepak@.service" \
+    "$pkgdir/usr/lib/systemd/system/pc-gamepak@.service"
+  install -Dm644 "linux/pc-gamepak-remove@.service" \
+    "$pkgdir/usr/lib/systemd/system/pc-gamepak-remove@.service"
+  install -Dm644 linux/99-pc-gamepak.rules \
+    "$pkgdir/usr/lib/udev/rules.d/99-pc-gamepak.rules"
+
+  install -Dm644 cartridge.conf.example \
+    "$pkgdir/usr/share/doc/$pkgname/cartridge.conf.example"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

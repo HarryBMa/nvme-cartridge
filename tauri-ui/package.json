@@ -1,7 +1,7 @@
 {
-  "name": "pc-cartridge-launcher-ui",
+  "name": "pc-gamepak-ui",
   "version": "0.1.0",
-  "description": "Dark popup UI for the PC Cartridge System",
+  "description": "Dark popup UI for the PC GamePak",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",

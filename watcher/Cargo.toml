@@ -1,18 +1,26 @@
 [package]
-name = "pc-cartridge-watcher"
+name = "pc-gamepak-watcher"
 version = "0.1.0"
 edition = "2021"
 description = "Waits for a cartridge to be plugged in and opens the launcher"
 license = "MIT"
 
-# Deliberately no dependencies beyond the Windows API bindings: this process is
-# resident for the whole login session, so everything it links is RAM that never
-# comes back.
+# Deliberately almost no dependencies: this process is resident for the whole
+# login session, so everything it links is RAM that never comes back. libc is
+# the exception that proves it — bindings only, and std already links the C
+# library on Linux, so poll() and kill() cost declarations and nothing else.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_System_LibraryLoader",
     "Win32_UI_WindowsAndMessaging",
+    # RegisterClassW and WNDCLASSW live behind this one, because WNDCLASSW
+    # carries HBRUSH and HICON. The watcher's window is never painted, but the
+    # struct still has to exist to register the class.
+    "Win32_Graphics_Gdi",
 ] }
 
 # Host-gated: rc.exe ships with the MSVC toolchain, so this applies when

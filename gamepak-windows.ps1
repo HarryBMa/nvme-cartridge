@@ -49,8 +49,8 @@ while ($true) {
             Clear-Host
 
             # Prefer a local build so the wizard works before installing.
-            $Built = Join-Path $ScriptDir "tauri-ui\src-tauri\target\release\pc-cartridge-launcher.exe"
-            $Installed = Join-Path $env:LOCALAPPDATA "PC-Cartridge-System\pc-cartridge-launcher.exe"
+            $Built = Join-Path $ScriptDir "tauri-ui\src-tauri\target\release\pc-gamepak.exe"
+            $Installed = Join-Path $env:LOCALAPPDATA "PC-GamePak\pc-gamepak.exe"
 
             $Launcher = if (Test-Path $Built) { $Built } elseif (Test-Path $Installed) { $Installed } else { $null }
 

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <title>PC Cartridge System</title>
+  <title>PC GamePak</title>
   <!--
     App icon: a cartridge, drawn as flat vector so it stays crisp from 16px to
     512px. Rasterised into the PNG/ICO set by tools/make-icons.mjs; edit this
