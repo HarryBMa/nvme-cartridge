@@ -17,6 +17,8 @@
  * come off an untrusted volume and must never be able to inject markup.
  */
 
+import { connect as connectGamepad } from "./gamepad.js";
+
 const tauri = window.__TAURI__;
 const invoke = tauri?.core?.invoke ?? demoInvoke;
 
@@ -371,6 +373,9 @@ async function init() {
 
   setBusy(false);
   await showWindow();
+  // Only now is there something to point at: with a pad connected the cursor
+  // starts on the first Play button.
+  gamepad.focusFirst();
 }
 
 /* ==========================================================================
@@ -516,6 +521,24 @@ el.bundleEject.addEventListener("click", async () => {
   await doEject(el.bundleEject.querySelector(".btn__label"));
 });
 
+// A controller reaches the same four things the keyboard does, and nothing
+// more: it moves focus and clicks, so it cannot start anything a person at the
+// keyboard could not.
+const gamepad = connectGamepad({
+  play: () => {
+    if (cartridge?.isBundle && cartridge.games?.length > 0) {
+      el.gameList.querySelector(".game-row__play")?.click();
+    } else {
+      el.play.click();
+    }
+  },
+  details: () => toggleSheet(),
+  back: () => {
+    if (el.sheet.classList.contains("is-open")) toggleSheet(false);
+    else closeWindow();
+  },
+});
+
 el.close.addEventListener("click", closeWindow);
 el.details.addEventListener("click", () => toggleSheet());
 el.sheetClose.addEventListener("click", () => toggleSheet(false));
@@ -582,7 +605,7 @@ async function demoInvoke(command, args) {
       if (state === "bundle") {
         return {
           title: "God of War Collection",
-          cover: "src/demo/cover.jpg",
+          cover: "src/demo/gow-collection.jpg",
           cover_path: "D:\\collection.jpg",
           executable: "steam://rungameid/310970",
           drive_path: args.drivePath,
@@ -592,13 +615,13 @@ async function demoInvoke(command, args) {
             {
               title: "God of War (2018)",
               executable: "steam://rungameid/310970",
-              cover: "src/demo/cover.jpg",
+              cover: "src/demo/gow-1.jpg",
               coverPath: "",
             },
             {
               title: "God of War: Ragnarök",
               executable: "steam://rungameid/1476670",
-              cover: "",
+              cover: "src/demo/gow-2.jpg",
               coverPath: "",
             },
           ],

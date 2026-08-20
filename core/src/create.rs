@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::drives::{self, TargetDrive};
-use crate::{autorun, format, health, playnite, portable, sgdb, steam, steamlib, trim};
+use crate::{autorun, format, health, playnite, portable, sgdb, steam, steamlib, trim, verify};
 
 /// Past this, a DRAM-less drive behind a USB bridge has little room for its
 /// garbage collector to work in. Matches health.rs, which says the same thing
@@ -127,6 +127,11 @@ pub struct CartridgeRequest {
     /// Absolute path to the collection's cover image for a bundle.
     #[serde(default)]
     pub collection_cover_source: Option<String>,
+    /// Read the cartridge back after copying and check every file against the
+    /// sum taken as it was written. One extra pass over the drive, so it is
+    /// asked for rather than assumed.
+    #[serde(default)]
+    pub verify_copy: bool,
     /// Ask the drive to release freed blocks once everything is written.
     ///
     /// Only worth it when the cartridge was not formatted first — mkfs already
@@ -186,6 +191,8 @@ pub struct CartridgeResult {
     pub used_percent: u8,
     /// What came of the TRIM, when one was asked for.
     pub trim: Option<String>,
+    /// What came of the integrity check, when one was asked for.
+    pub verified: Option<String>,
     pub warnings: Vec<String>,
 }
 
@@ -394,12 +401,17 @@ pub fn create_cartridge(
         game_folder: None,
         used_percent: 0,
         trim: None,
+        verified: None,
         warnings: Vec::new(),
     };
 
     // Never trust the window's idea of where to write. The allowed set is
     // re-derived and an exact match required.
     let root = resolve_target(&request.drive_path)?;
+
+    // Every file copied across, with the sum taken as it was written. Only
+    // filled in when the build was asked to check its own work.
+    let mut written: Vec<verify::FileDigest> = Vec::new();
 
     let title = sanitize_conf_value(&request.title);
     if title.is_empty() {
@@ -473,6 +485,7 @@ pub fn create_cartridge(
                         if result.game_folder.is_none() {
                             result.game_folder = copied.folder.clone();
                         }
+                        written.extend(copied.digests);
                         // A generic copy moves the launch target onto the
                         // cartridge; a Steam copy keeps its steam:// URI.
                         if let Some(on_cartridge) = copied.executable {
@@ -598,7 +611,14 @@ pub fn create_cartridge(
             );
         }
 
-        finish(request, &root, &mut result, &mut warnings, progress);
+        finish(
+            request,
+            &root,
+            written,
+            &mut result,
+            &mut warnings,
+            progress,
+        );
         result.warnings = warnings;
         return Ok(result);
     }
@@ -617,6 +637,7 @@ pub fn create_cartridge(
                 result.bytes_copied = copied.bytes;
                 result.registered_with_steam = copied.registered_with_steam;
                 result.game_folder = copied.folder.clone();
+                written.extend(copied.digests);
                 // A generic copy replaces the launch target with a path on the
                 // cartridge; a Steam copy keeps its steam:// URI.
                 if let Some(on_cartridge) = copied.executable {
@@ -695,7 +716,14 @@ pub fn create_cartridge(
         );
     }
 
-    finish(request, &root, &mut result, &mut warnings, progress);
+    finish(
+        request,
+        &root,
+        written,
+        &mut result,
+        &mut warnings,
+        progress,
+    );
     result.warnings = warnings;
     Ok(result)
 }
@@ -708,10 +736,65 @@ pub fn create_cartridge(
 fn finish(
     request: &CartridgeRequest,
     root: &Path,
+    written: Vec<verify::FileDigest>,
     result: &mut CartridgeResult,
     warnings: &mut Vec<String>,
     progress: &mut dyn FnMut(Progress),
 ) {
+    if request.verify_copy && !written.is_empty() {
+        let manifest = verify::Manifest { files: written };
+        let total = manifest.total_bytes();
+
+        progress(Progress {
+            step: "verify",
+            message: "Reading the cartridge back…".to_string(),
+            done_bytes: 0,
+            total_bytes: total,
+        });
+
+        let problems = verify::verify(root, &manifest, &mut |done, total| {
+            progress(Progress {
+                step: "verify",
+                message: "Reading the cartridge back…".to_string(),
+                done_bytes: done,
+                total_bytes: total,
+            });
+        });
+
+        let files = manifest.files.len();
+        if problems.is_empty() {
+            result.verified = Some(format!(
+                "Checked all {files} files against what was written; every one matches."
+            ));
+            // Left on the cartridge so it can be checked again later, on a
+            // machine that no longer has the original.
+            if let Err(e) = verify::write_manifest(root, &manifest) {
+                warnings.push(format!("The file list was not saved to the cartridge: {e}"));
+            }
+        } else {
+            // Named individually up to a point: "3 files are wrong" is not
+            // actionable, and the first few are usually the whole story.
+            let named: Vec<String> = problems
+                .iter()
+                .take(5)
+                .map(verify::Problem::describe)
+                .collect();
+            let more = problems.len().saturating_sub(named.len());
+            let tail = if more > 0 {
+                format!(" (and {more} more)")
+            } else {
+                String::new()
+            };
+            let message = format!(
+                "The copy did not survive: {}{tail}. Copy it again, and if it keeps happening \
+                 try another cable or port before blaming the drive.",
+                named.join("; ")
+            );
+            result.verified = Some(message.clone());
+            warnings.push(message);
+        }
+    }
+
     if request.trim_after_write {
         progress(Progress {
             step: "trim",
@@ -743,6 +826,9 @@ struct Copied {
     /// Where the files landed, relative to the cartridge root.
     folder: Option<String>,
     registered_with_steam: bool,
+    /// Every file that was written, and its sum, when the copy was asked to
+    /// keep track. Empty otherwise.
+    digests: Vec<crate::verify::FileDigest>,
 }
 
 /// Copy the game, by whichever route suits where it came from.
@@ -809,21 +895,24 @@ fn copy_portable_game(
     });
 
     let name = title.clone();
-    let bytes = steamlib::copy_tree(&source, &destination, &mut |done| {
-        progress(Progress {
-            step: "copy",
-            message: format!("Copying {name}…"),
-            done_bytes: done,
-            total_bytes: total,
-        });
-    })
-    .map_err(|e| format!("{}: {e}", source.display()))?;
+    let mut digests = request.verify_copy.then(|| verify::Digests::new(root));
+    let bytes =
+        steamlib::copy_tree_digesting(&source, &destination, digests.as_mut(), &mut |done| {
+            progress(Progress {
+                step: "copy",
+                message: format!("Copying {name}…"),
+                done_bytes: done,
+                total_bytes: total,
+            });
+        })
+        .map_err(|e| format!("{}: {e}", source.display()))?;
 
     Ok(Some(Copied {
         bytes,
         executable: Some(format!("{relative_folder}/{chosen}")),
         folder: Some(relative_folder),
         registered_with_steam: false,
+        digests: digests.map(|d| d.into_manifest().files).unwrap_or_default(),
     }))
 }
 
@@ -979,14 +1068,20 @@ fn copy_steam_game(
     });
 
     let name = game.name.clone();
-    let copied = steamlib::copy_tree(&game.install_path, &destination, &mut |done| {
-        progress(Progress {
-            step: "copy",
-            message: format!("Copying {name}…"),
-            done_bytes: done,
-            total_bytes: total,
-        });
-    })
+    let mut digests = request.verify_copy.then(|| verify::Digests::new(root));
+    let copied = steamlib::copy_tree_digesting(
+        &game.install_path,
+        &destination,
+        digests.as_mut(),
+        &mut |done| {
+            progress(Progress {
+                step: "copy",
+                message: format!("Copying {name}…"),
+                done_bytes: done,
+                total_bytes: total,
+            });
+        },
+    )
     .map_err(|e| format!("{}: {e}", game.install_path.display()))?;
 
     // The manifest is how Steam recognises the game in this library.
@@ -1017,6 +1112,7 @@ fn copy_steam_game(
         executable: None,
         folder: Some("steamapps/common".to_string()),
         registered_with_steam: registered,
+        digests: digests.map(|d| d.into_manifest().files).unwrap_or_default(),
     }))
 }
 
@@ -1062,7 +1158,7 @@ pub fn default_label_for(filesystem: format::Filesystem, title: &str) -> String 
 }
 
 /// Check the requested drive is one we are actually willing to write to.
-fn resolve_target(requested: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_target(requested: &str) -> Result<PathBuf, String> {
     if requested.trim().is_empty() {
         return Err("Choose a drive first.".into());
     }
@@ -1134,7 +1230,7 @@ fn cover_source(
 ///
 /// Returns the name relative to the cartridge root, which is what goes into
 /// cartridge.conf.
-fn copy_cover(source: &Path, root: &Path, stem: &str) -> Result<String, String> {
+pub(crate) fn copy_cover(source: &Path, root: &Path, stem: &str) -> Result<String, String> {
     let meta = std::fs::metadata(source).map_err(|e| format!("{}: {e}", source.display()))?;
     if !meta.is_file() {
         return Err(format!("{} is not a file", source.display()));

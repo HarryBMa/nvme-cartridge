@@ -14,6 +14,8 @@
  *   sgdb_last_used_artwork({ gameKey }) -> { path, dataUri } | null
  *   pick_cover_image()               -> { path, preview } | null
  *   host_platform()                  -> "windows" | "linux" | …
+ *   read_cartridge_for_edit({ drivePath }) -> { title, cover, games[], … }
+ *   update_cartridge({ request })    -> { confPath, coverWritten, warnings[] }
  *   tuning_plan({ drivePath, tweaks, applying })  -> [command, …]
  *   apply_tuning({ drivePath, tweaks, applying }) -> [what was done, …]
  *   list_target_drives()             -> [{ path, label, totalBytes, freeBytes, hasCartridge }]
@@ -76,6 +78,8 @@ const el = {
   progressText: document.getElementById("progress-text"),
   status: document.getElementById("status"),
   optCopyLabel: document.getElementById("opt-copy-label"),
+  optVerifyRow: document.getElementById("opt-verify-row"),
+  optVerify: document.getElementById("opt-verify"),
   optTrimRow: document.getElementById("opt-trim-row"),
   optTrim: document.getElementById("opt-trim"),
   optTuneRow: document.getElementById("opt-tune-row"),
@@ -84,6 +88,16 @@ const el = {
   btnTuneUndo: document.getElementById("btn-tune-undo"),
   btnCollectionCover: document.getElementById("btn-collection-cover"),
   btnCollectionCoverClear: document.getElementById("btn-collection-cover-clear"),
+  btnEdit: document.getElementById("btn-edit"),
+  editDialog: document.getElementById("edit-dialog"),
+  editClose: document.getElementById("edit-close"),
+  editTitle: document.getElementById("edit-title"),
+  editGames: document.getElementById("edit-games"),
+  editGamesHint: document.getElementById("edit-games-hint"),
+  editSave: document.getElementById("edit-save"),
+  editStatus: document.getElementById("edit-status"),
+  btnEditCover: document.getElementById("btn-edit-cover"),
+  editCoverName: document.getElementById("edit-cover-name"),
   btnSettings: document.getElementById("btn-settings"),
   settingsDialog: document.getElementById("settings-dialog"),
   settingsClose: document.getElementById("settings-close"),
@@ -128,6 +142,8 @@ const TWEAKS = ["defender", "indexing"];
 let settings = { steamgriddbEnabled: false, steamgriddbApiKey: "" };
 /** Artwork chosen for the collection: { path, preview }. */
 let collectionCover = null;
+/** The cartridge being edited, once one has been read. */
+let editing = null;
 let sgdbSearchTimer = null;
 let sgdbResultsFor = [];
 let sgdbSelectedGameId = null;
@@ -425,6 +441,135 @@ function isBundleMode() {
   return bundleGames.size >= 2;
 }
 
+/* ------------------------------------------------------------------- edit */
+
+/**
+ * Open the editor on the cartridge already on the chosen drive.
+ *
+ * Only the metadata is in play here: the name, the artwork and which games are
+ * listed. Nothing this dialog does copies or deletes a game.
+ */
+async function openEditor() {
+  if (!selectedDrive) return;
+  el.editStatus.textContent = "";
+
+  try {
+    editing = await invoke("read_cartridge_for_edit", { drivePath: selectedDrive });
+  } catch (error) {
+    status(String(error), "error");
+    return;
+  }
+
+  el.editTitle.value = editing.title ?? "";
+  el.editCoverName.textContent = editing.coverPath ? "" : "no artwork on this cartridge";
+  el.btnEditCover.querySelector(".btn__label").textContent = "Change artwork…";
+  // A picture chosen in a previous session of the dialog should not linger.
+  editing.newCover = null;
+  renderEditGames();
+
+  if (typeof el.editDialog.showModal === "function") el.editDialog.showModal();
+  else el.editDialog.setAttribute("open", "");
+}
+
+/** One row per game: its name, where it sits in the order, and a way out. */
+function renderEditGames() {
+  el.editGames.replaceChildren(
+    ...editing.games.map((game, index) => {
+      const li = document.createElement("li");
+      li.className = "edit-row";
+
+      const n = document.createElement("span");
+      n.className = "edit-row__n";
+      n.textContent = String(index + 1);
+
+      const name = document.createElement("input");
+      name.type = "text";
+      name.className = "edit-row__name";
+      name.value = game.title;
+      name.setAttribute("aria-label", `Name of game ${index + 1}`);
+      name.addEventListener("input", () => {
+        game.title = name.value;
+      });
+
+      const up = document.createElement("button");
+      up.type = "button";
+      up.className = "edit-row__move";
+      up.textContent = "↑";
+      up.disabled = index === 0;
+      up.setAttribute("aria-label", `Move ${game.title} up`);
+      up.addEventListener("click", () => moveGame(index, -1));
+
+      const down = document.createElement("button");
+      down.type = "button";
+      down.className = "edit-row__move";
+      down.textContent = "↓";
+      down.disabled = index === editing.games.length - 1;
+      down.setAttribute("aria-label", `Move ${game.title} down`);
+      down.addEventListener("click", () => moveGame(index, 1));
+
+      const drop = document.createElement("button");
+      drop.type = "button";
+      drop.className = "edit-row__drop";
+      drop.textContent = "×";
+      drop.disabled = editing.games.length === 1;
+      drop.setAttribute("aria-label", `Remove ${game.title} from the list`);
+      drop.addEventListener("click", () => {
+        editing.games.splice(index, 1);
+        renderEditGames();
+      });
+
+      li.append(n, name, up, down, drop);
+      return li;
+    }),
+  );
+
+  // Said plainly, because "remove" reads like "delete" and here it is not.
+  el.editGamesHint.textContent = editing.holdsGame
+    ? "Removing a game only takes it off the list. Its files stay on the cartridge."
+    : "Removing a game only takes it off the list.";
+}
+
+function moveGame(index, direction) {
+  const target = index + direction;
+  if (target < 0 || target >= editing.games.length) return;
+  const [game] = editing.games.splice(index, 1);
+  editing.games.splice(target, 0, game);
+  renderEditGames();
+}
+
+async function saveEdits() {
+  el.editSave.disabled = true;
+  el.editStatus.textContent = "Saving…";
+
+  try {
+    const result = await invoke("update_cartridge", {
+      request: {
+        drivePath: selectedDrive,
+        title: el.editTitle.value.trim(),
+        coverSource: editing.newCover?.path ?? null,
+        games: editing.games.map((game) => ({
+          title: game.title,
+          executable: game.executable,
+          coverSource: game.newCover?.path ?? null,
+        })),
+      },
+    });
+
+    const said = ["Cartridge updated."];
+    if (result.coverWritten) said.push("New artwork copied.");
+    if (result.icon) said.push("Drive icon set.");
+    said.push(...(result.warnings ?? []));
+    status(said.join(" "), result.warnings?.length ? "" : "good");
+
+    el.editDialog.close("saved");
+    await loadDrives({ keepSelection: true, quiet: true });
+  } catch (error) {
+    el.editStatus.textContent = String(error);
+  } finally {
+    el.editSave.disabled = false;
+  }
+}
+
 /* --------------------------------------------------------------- settings */
 
 /** Apply the settings to everything whose visibility depends on them. */
@@ -547,9 +692,12 @@ async function selectDrive(drive) {
     el.unregister.hidden = true;
   }
 
+  // Editing is only on offer when there is something there to edit.
+  el.btnEdit.hidden = !drive.hasCartridge;
+
   status(
     drive.hasCartridge
-      ? `${drive.label} already holds a cartridge. Writing will replace it.`
+      ? `${drive.label} already holds a cartridge. Writing will replace it — or edit it instead.`
       : "",
   );
 }
@@ -608,6 +756,10 @@ function refreshOptions() {
     }
   }
   el.optCopyHint.textContent = hint;
+
+  // Only meaningful when files are actually going across.
+  el.optVerifyRow.hidden = !el.optCopy.checked;
+  if (!el.optCopy.checked) el.optVerify.checked = false;
 
   // A format discards the whole volume on its way past, so a TRIM afterwards
   // would be a permission prompt to do nothing.
@@ -999,6 +1151,7 @@ async function writeCartridge() {
         formatLabel: el.formatLabel.value.trim() || null,
         formatConfirmation: el.formatConfirm.value.trim() || null,
         copyGame: el.optCopy.checked,
+        verifyCopy: el.optVerify.checked,
         trimAfterWrite: el.optTrim.checked,
         collectionCoverSource: collectionCover?.path ?? null,
         games: bundleList.map((g) => ({
@@ -1025,6 +1178,7 @@ async function writeCartridge() {
         formatConfirmation: el.formatConfirm.value.trim() || null,
         copyGame: el.optCopy.checked,
         copyExecutable: el.exePick.hidden ? null : el.exeChoices.value || null,
+        verifyCopy: el.optVerify.checked,
         trimAfterWrite: el.optTrim.checked,
       };
     }
@@ -1046,6 +1200,7 @@ async function writeCartridge() {
       );
     }
     if (result.registeredWithSteam) parts.push("Registered with Steam.");
+    if (result.verified) parts.push(result.verified);
     if (result.trim) parts.push(result.trim);
     if (result.coverWritten) parts.push("Cover art copied.");
     if (result.icon) parts.push("Drive icon set.");
@@ -1188,6 +1343,23 @@ el.btnTuneUndo.addEventListener("click", async () => {
   el.btnTuneUndo.hidden = true;
   el.btnTuneUndo.disabled = false;
 });
+el.btnEdit.addEventListener("click", openEditor);
+el.editSave.addEventListener("click", saveEdits);
+el.btnEditCover.addEventListener("click", async () => {
+  el.btnEditCover.disabled = true;
+  try {
+    const picked = await invoke("pick_cover_image");
+    if (picked) {
+      editing.newCover = picked;
+      el.editCoverName.textContent = "new artwork chosen";
+      el.btnEditCover.querySelector(".btn__label").textContent = "Choose another…";
+    }
+  } catch (error) {
+    el.editStatus.textContent = String(error);
+  } finally {
+    el.btnEditCover.disabled = false;
+  }
+});
 el.btnSettings.addEventListener("click", openSettings);
 el.settingsSave.addEventListener("click", saveSettings);
 el.setSgdb.addEventListener("change", () => {
@@ -1215,8 +1387,11 @@ el.btnCollectionCoverClear.addEventListener("click", () => {
   el.btnCollectionCover.querySelector(".btn__label").textContent = "Choose artwork…";
   refreshCollectionPreview();
 });
+el.optVerify.addEventListener("change", refreshCreateButton);
 el.optCopy.addEventListener("change", () => {
-  refreshExePicker();
+  // refreshOptions, not just the exe picker: the rows that only make sense
+  // once files are moving — the check, and its hint — hang off this too.
+  refreshOptions();
   refreshCreateButton();
 });
 el.exeChoices.addEventListener("change", refreshCreateButton);
@@ -1340,6 +1515,21 @@ async function demoInvoke(command, args) {
         ? `${shared.join(" ")} Collection`
         : `${args.titles[0]} and ${args.titles.length - 1} more`;
     }
+    case "read_cartridge_for_edit":
+      return {
+        drivePath: args.drivePath,
+        title: "God of War Collection",
+        cover: "src/demo/gow-collection.jpg",
+        coverPath: "D:\\collection.jpg",
+        isBundle: true,
+        holdsGame: true,
+        games: [
+          { title: "God of War (2018)", executable: "steam://rungameid/1593500", cover: "", coverPath: "" },
+          { title: "God of War Ragnarök", executable: "steam://rungameid/2322010", cover: "", coverPath: "" },
+        ],
+      };
+    case "update_cartridge":
+      return { confPath: `${args.request.drivePath}/cartridge.conf`, coverWritten: Boolean(args.request.coverSource), autorunWritten: true, icon: null, warnings: [] };
     case "host_platform":
       return "linux";
     case "tuning_plan":

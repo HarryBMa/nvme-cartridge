@@ -14,6 +14,8 @@
 //   launch_game(executable, drive_path)      -> ()
 //   eject_drive(drive_path)                  -> ()
 //   cartridge_health(drive_path)             -> Health
+//   read_cartridge_for_edit(drive_path)      -> Editable
+//   update_cartridge(request)                -> UpdateResult
 //
 // Wizard commands:
 //   list_games()                             -> Vec<GameInfo>  (Playnite + Steam)
@@ -43,7 +45,7 @@
 // All of the real work lives in gamepak-core, which has no UI dependency and
 // so can be tested without a webview. This file is the Tauri shell around it.
 use gamepak_core::cartridge::{self, CartridgeInfo};
-use gamepak_core::{create, drives, format, health, settings, sgdb, tuning};
+use gamepak_core::{create, drives, edit, format, health, settings, sgdb, tuning};
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -345,6 +347,19 @@ async fn cartridge_health(drive_path: String) -> health::Health {
         .unwrap_or_default()
 }
 
+/// Read a cartridge that already exists, so its metadata can be changed without
+/// writing the whole thing again.
+#[tauri::command]
+fn read_cartridge_for_edit(drive_path: String) -> Result<edit::Editable, String> {
+    edit::read(&drive_path)
+}
+
+/// Rewrite a cartridge's metadata. Copies nothing, deletes no game.
+#[tauri::command]
+fn update_cartridge(request: edit::UpdateRequest) -> Result<edit::UpdateResult, String> {
+    edit::update(&request)
+}
+
 /// Which OS the wizard is running on, so it can offer only what exists here.
 #[tauri::command]
 fn host_platform() -> &'static str {
@@ -533,6 +548,8 @@ fn main() {
             suggest_collection_name,
             pick_cover_image,
             cartridge_health,
+            read_cartridge_for_edit,
+            update_cartridge,
             host_platform,
             tuning_plan,
             apply_tuning,

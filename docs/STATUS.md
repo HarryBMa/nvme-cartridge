@@ -14,6 +14,7 @@ the wizard make is testable on any machine, in CI, without a webview.
 |---|---|
 | `cartridge` | Reads a cartridge: `cartridge.conf` (single game, or `[collection]` + `[game]` sections) and legacy `autorun.inf` for label and icon only. Inline INI parser, path confinement, cover inlined as a `data:` URI under an 8 MB cap. |
 | `create` | The build pipeline: format → copy → check the launch target → cover art → `cartridge.conf` → `autorun.inf` → trim and report. Game lists from Playnite and Steam, collection naming, per-game covers. |
+| `edit` | Rewrites a cartridge's metadata — name, artwork, which games are listed and in what order — without copying or deleting anything. |
 | `drives` | Which volumes may be written to — an allowlist of automount locations, never a denylist. Parses `/proc/mounts`; Win32 volume APIs on Windows. |
 | `format` | exFAT and btrfs, behind four gates: removable allowlist re-derived here, not the system drive, the current label typed back exactly, and explicitly asked for. |
 | `health` | Negotiated link speed, UASP vs BOT, how full the drive is. sysfs on Linux; the transport only, lazily, on Windows. |
@@ -25,6 +26,7 @@ the wizard make is testable on any machine, in CI, without a webview.
 | `steamlib` | Copies a Steam game onto a cartridge and registers the drive as a Steam library, so Steam plays from the cartridge. |
 | `trim` | Tells the drive which blocks it no longer has to keep. Treats "this enclosure will not" as a fact, not a failure. |
 | `tuning` | The Windows settings worth changing per cartridge, the commands they run, and their exact opposites. |
+| `verify` | CRC-32, taken as each file is copied and checked by reading the cartridge back. Leaves a manifest so the same check can be run later without the original. |
 | `autorun` | Writes `autorun.inf` so Explorer shows the game's name and icon; builds a PNG-in-ICO when the cover allows it. |
 
 ### `tauri-ui/` — one binary, two windows
@@ -81,10 +83,11 @@ Ranked by how much it matters.
    Linux only, so the failure surfaced in the launcher job and looked like a
    launcher problem. Core is checked on both operating systems now.
 3. **Version numbers.** Three crates all saying `0.1.0`, moved by hand.
-4. **A cartridge cannot be edited.** Changing a title or swapping the art means
-   writing the whole cartridge again, or editing `cartridge.conf` by hand.
-5. **No integrity check.** Nothing verifies that a copied game arrived intact.
-   For 60 GB over USB that is worth having.
+4. **Adding a game to an existing cartridge** still means writing it again.
+   Editing covers everything that does not move files; adding one does.
+5. **Verifying a cartridge you already have.** The manifest is written and
+   checked at copy time, but nothing yet re-checks a cartridge on demand — the
+   pieces are all in `verify`, it needs a command and a button.
 6. **Windows code signing.** Unsigned means SmartScreen on every download.
 7. **macOS** is not supported at all — no watcher, no installer, no icons.
 
