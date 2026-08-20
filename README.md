@@ -2,14 +2,23 @@
 
 <img src="docs/icon.png" width="96" alt="" />
 
-
-<a href="https://ko-fi.com/harrybma">Support my work!</a>
-
-
 # PC GamePak
 
 **Turn removable storage into physical game cartridges.**
 Plug one in and a launcher appears with the game's cover art and two buttons.
+
+[![CI](https://github.com/HarryBMa/pc-gamepak/actions/workflows/ci.yml/badge.svg)](https://github.com/HarryBMa/pc-gamepak/actions/workflows/ci.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/HarryBMa/pc-gamepak)](https://github.com/HarryBMa/pc-gamepak/releases)
+[![AUR version](https://img.shields.io/aur/version/pc-gamepak)](https://aur.archlinux.org/packages/pc-gamepak)
+[![WinGet version](https://img.shields.io/winget/v/HarryBMa.pc-gamepak)](https://github.com/microsoft/winget-pkgs)
+[![License](https://img.shields.io/github/license/HarryBMa/pc-gamepak)](LICENSE)
+[![Support on Ko-Fi](https://img.shields.io/badge/Support-Ko--Fi-F16061?logo=ko-fi&logoColor=white)](https://ko-fi.com/harrybma)
+
+<br />
+
+[![Windows Support](https://img.shields.io/badge/Windows-Supported-0078D4?logo=windows&logoColor=white)](#)
+[![Linux Support](https://img.shields.io/badge/Linux-Supported-FCC624?logo=linux&logoColor=black)](#)
+[![Steam Deck Support](https://img.shields.io/badge/Steam_Deck-Supported-1A9FFF?logo=steamdeck&logoColor=white)](#)
 
 <img width="420" alt="The cartridge launcher: cover art filling the window, the game title, and Play and Eject buttons" src="docs/launcher.png" />
 
