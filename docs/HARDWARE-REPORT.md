@@ -107,15 +107,14 @@ Commit `9cbbc69`. Re-verified: 20 passed, 0 failed.
 
 | Artifact | Path | Size |
 |---|---|---|
-| Launcher and wizard | `tauri-ui\src-tauri	argetelease\pc-gamepak.exe` | 7,148,544 bytes |
-| Watcher | `watcher	argetelease\pc-gamepak-watcher.exe` | 255,488 bytes |
-| NSIS installer | `tauri-ui\src-tauri	argeteleaseundle
-sis\PC GamePak_0.1.0_x64-setup.exe` | 2,284,089 bytes |
-| MSI installer | `tauri-ui\src-tauri	argeteleaseundle\msi\PC GamePak_0.1.0_x64_en-US.msi` | 3,026,944 bytes |
+| Launcher and wizard | `tauri-ui/src-tauri/target/release/pc-gamepak.exe` | 7,148,544 bytes |
+| Watcher | `watcher/target/release/pc-gamepak-watcher.exe` | 255,488 bytes |
+| NSIS installer | `tauri-ui/src-tauri/target/release/bundle/nsis/PC GamePak_0.1.0_x64-setup.exe` | 2,284,089 bytes |
+| MSI installer | `tauri-ui/src-tauri/target/release/bundle/msi/PC GamePak_0.1.0_x64_en-US.msi` | 3,026,944 bytes |
 
 `npm run build` is `tauri build`, so it produces the binary *and* both
-installers; there is no separate frontend build step. Note the binary is under
-`tauri-ui\src-tauri	argetelease\`, not a top-level `targetelease\`.
+installers; there is no separate frontend build step. Note the binary lives
+under `tauri-ui/src-tauri/target/release/`, not a top-level `target/release/`.
 Tauri downloaded NSIS 3.11 and WiX 3.14 during bundling, so the first build on
 a fresh machine needs network access.
 
