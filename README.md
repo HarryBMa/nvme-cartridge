@@ -13,6 +13,12 @@ Plug one in and a launcher appears with the game's cover art and two buttons.
 
 <img width="420" alt="The cartridge launcher: cover art filling the window, the game title, and Play and Eject buttons" src="docs/launcher.png" />
 
+[![CI](https://github.com/HarryBMa/pc-gamepak/actions/workflows/ci.yml/badge.svg)](https://github.com/HarryBMa/pc-gamepak/actions/workflows/ci.yml)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+[![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-2f4b5e.svg)](#setup)
+[![Built with Rust and Tauri](https://img.shields.io/badge/built%20with-Rust%20%2B%20Tauri%202-b7410e.svg)](#working-on-it)
+[![Works offline](https://img.shields.io/badge/works-offline-2e7d52.svg)](#security)
+
 </div>
 
 ---
@@ -106,7 +112,7 @@ A 256 GB drive holds a series, not a game. Put several on one cartridge and the
 launcher shows the collection's artwork and title with **one Play button per
 game** — no menu, no submenu, nothing to learn.
 
-<img width="420" alt="The launcher showing a collection: the artwork behind a list of games, each with its own Play button, and Eject below" src="docs/launcher-bundle.png" />
+<img width="420" alt="The launcher showing a God of War collection: the collection's artwork behind a list of games, each with its own Play button and thumbnail, and Eject below" src="docs/launcher-bundle.png" />
 
 Each row carries the game's own art, and the first nine answer to the number
 keys. A cartridge with one game on it still gets the plain Play and Eject pair.
@@ -193,6 +199,27 @@ own — what to call it, and what it should look like:
 
 Copying works the same for a collection as for a single game: tick the box and
 every game goes across, each Play button pointing at its own copy.
+
+### Changing a cartridge you already made
+
+Everything a cartridge says about itself is two small files and a picture, so
+renaming one, fixing a typo or swapping its art should not mean writing the
+whole thing again — which, with the games copied onto it, is hours.
+
+Select a drive that already holds a cartridge and **Edit the cartridge already
+on this drive** appears:
+
+<img width="760" alt="The edit dialog: the cartridge name, a Change artwork button, and the list of games with controls to rename, reorder and remove them" src="docs/wizard-edit.png" />
+
+You can rename the cartridge, change its artwork, rename the individual games,
+reorder them — the order is the order of the Play buttons — and take one off the
+list. Adding a game means writing the cartridge again, since that is when files
+move.
+
+**Nothing here copies or deletes a game.** Taking a game off the list leaves its
+files exactly where they are; the launcher simply stops offering it. A cartridge
+that ends up with one game on the list becomes an ordinary single-game cartridge
+again, and one that gains a second becomes a collection.
 
 ### Checking the copy
 

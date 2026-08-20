@@ -1158,7 +1158,7 @@ pub fn default_label_for(filesystem: format::Filesystem, title: &str) -> String 
 }
 
 /// Check the requested drive is one we are actually willing to write to.
-fn resolve_target(requested: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_target(requested: &str) -> Result<PathBuf, String> {
     if requested.trim().is_empty() {
         return Err("Choose a drive first.".into());
     }
@@ -1230,7 +1230,7 @@ fn cover_source(
 ///
 /// Returns the name relative to the cartridge root, which is what goes into
 /// cartridge.conf.
-fn copy_cover(source: &Path, root: &Path, stem: &str) -> Result<String, String> {
+pub(crate) fn copy_cover(source: &Path, root: &Path, stem: &str) -> Result<String, String> {
     let meta = std::fs::metadata(source).map_err(|e| format!("{}: {e}", source.display()))?;
     if !meta.is_file() {
         return Err(format!("{} is not a file", source.display()));

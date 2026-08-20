@@ -605,7 +605,7 @@ async function demoInvoke(command, args) {
       if (state === "bundle") {
         return {
           title: "God of War Collection",
-          cover: "src/demo/cover.jpg",
+          cover: "src/demo/gow-collection.jpg",
           cover_path: "D:\\collection.jpg",
           executable: "steam://rungameid/310970",
           drive_path: args.drivePath,
@@ -615,13 +615,13 @@ async function demoInvoke(command, args) {
             {
               title: "God of War (2018)",
               executable: "steam://rungameid/310970",
-              cover: "src/demo/cover.jpg",
+              cover: "src/demo/gow-1.jpg",
               coverPath: "",
             },
             {
               title: "God of War: Ragnarök",
               executable: "steam://rungameid/1476670",
-              cover: "",
+              cover: "src/demo/gow-2.jpg",
               coverPath: "",
             },
           ],
