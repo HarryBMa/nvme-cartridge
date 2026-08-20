@@ -72,7 +72,8 @@ this repo.
 | `cargo clippy --manifest-path core/Cargo.toml --all-targets -- -D warnings` | **PASS** — clean |
 | `cargo clippy --manifest-path watcher/Cargo.toml --all-targets -- -D warnings` | **PASS** — clean |
 | `npm install` (tauri-ui) | **PASS** — 4 packages audited, 0 vulnerabilities |
-| `npm run build` + `cargo build --release` (tauri-ui) | in progress |
+| `npm run build` (tauri-ui, wraps `tauri build`) | **PASS** — release build in 1m 49s, **0 warnings** |
+| `cargo build --release` (watcher) | **PASS** — 4.08s, 0 warnings |
 
 ### Bug found and fixed: a watcher test could never pass on Windows
 
@@ -101,6 +102,25 @@ already covered as one by `a_tag_resolves_to_its_directory` and
 `a_uid_is_reduced_to_its_hex_digits`.
 
 Commit `9cbbc69`. Re-verified: 20 passed, 0 failed.
+
+### Build artifacts
+
+| Artifact | Path | Size |
+|---|---|---|
+| Launcher and wizard | `tauri-ui\src-tauri	argetelease\pc-gamepak.exe` | 7,148,544 bytes |
+| Watcher | `watcher	argetelease\pc-gamepak-watcher.exe` | 255,488 bytes |
+| NSIS installer | `tauri-ui\src-tauri	argeteleaseundle
+sis\PC GamePak_0.1.0_x64-setup.exe` | 2,284,089 bytes |
+| MSI installer | `tauri-ui\src-tauri	argeteleaseundle\msi\PC GamePak_0.1.0_x64_en-US.msi` | 3,026,944 bytes |
+
+`npm run build` is `tauri build`, so it produces the binary *and* both
+installers; there is no separate frontend build step. Note the binary is under
+`tauri-ui\src-tauri	argetelease\`, not a top-level `targetelease\`.
+Tauri downloaded NSIS 3.11 and WiX 3.14 during bundling, so the first build on
+a fresh machine needs network access.
+
+Both binaries are unsigned, so SmartScreen prompts are expected and are not
+defects.
 
 ---
 
@@ -196,7 +216,7 @@ Not run — needs elevation.
 
 | Phase | Status |
 |---|---|
-| 0 — build and unit tests | **PASS** (1 bug found and fixed; tauri-ui build in progress) |
+| 0 — build and unit tests | **PASS** — 169 tests, clippy clean, both binaries built (1 bug found and fixed) |
 | 1 — prepare the NVMe | **Blocked** — Open issue 2 |
 | 2 — wizard, non-destructive | Not started |
 | 3 — format and copy | Not started |
