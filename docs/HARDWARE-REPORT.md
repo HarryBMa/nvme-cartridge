@@ -13,17 +13,17 @@ Running log. Appended as work happens, not written up at the end.
 | Item | Value |
 |---|---|
 | OS | Windows 11 Pro 10.0.22621 |
-| Shell session elevation | **Not elevated** (see Blocker 3) |
-| rustc | 1.87.0 (17067e9ac 2025-05-09) |
-| cargo | 1.87.0 (99624be96 2025-05-06) |
-| Rust install | standalone MSI, `C:\Program Files\Rust stable MSVC 1.87` — **no rustup** |
+| Shell session elevation | **Not elevated** (see Open issue 3) |
+| rustc used for this run | **1.98.0 (88d9e12ae 2026-08-18)** via rustup |
+| Rust also installed | standalone MSI `C:\Program Files\Rust stable MSVC 1.87` — shadows rustup on PATH (see Open issue 1) |
 | node | v22.15.1 |
 | npm | 11.16.0 |
 | WebView2 runtime | 151.0.4129.93 — **present** |
+| MSVC toolchain | present and linking (core and watcher link and run) |
 | Steam | `c:/program files (x86)/steam`, running at session start |
-| `config/libraryfolders.vdf` | present |
+| `config/libraryfolders.vdf` | present, 3 libraries: `C:\Program Files (x86)\Steam`, `B:\Steam`, `F:\Games\Steam` |
 
-### Fixed disks (not to be touched)
+### Fixed disks — none of these is a cartridge candidate
 
 | Disk | Model | Bus | Size | Letter | Label |
 |---|---|---|---|---|---|
@@ -32,13 +32,13 @@ Running log. Appended as work happens, not written up at the end.
 | 2 | NVMe Samsung SSD 970 | NVMe | 931.5 GB | C: | Idris — **boot + system** |
 | 3 | Force MP600 | NVMe | 1863.0 GB | F: | GAMES (108.3 GB free of 1863) |
 
-All four are `DriveType = Fixed`. None is a candidate cartridge.
+All four are `DriveType = Fixed`.
 
-### Cartridge candidate
+### Cartridge candidate — the external NVMe
 
 | Item | Value |
 |---|---|
-| Device | `\.\PHYSICALDRIVE4` |
+| Device | `\\.\PHYSICALDRIVE4` |
 | Model | JMicron Tech SCSI Disk Device |
 | Serial | DD56419883914 |
 | Size | 256052966400 bytes (238.5 GiB / 256 GB) |
@@ -46,93 +46,149 @@ All four are `DriveType = Fixed`. None is a candidate cartridge.
 | Partitions | **none — no partition table** |
 | Drive letter | **none** |
 | Bridge | USB `VID_152D&PID_A583` = **JMicron JMS583**, USB 3.1 Gen 2 NVMe-to-USB bridge |
-| Driver attached | `USB Attached SCSI (UAS)` — **UASP, not BOT** |
+| Driver bound | `USB Attached SCSI (UAS)` — **UASP, not BOT** |
 | USB parent | `USB\ROOT_HUB30` — USB 3.x root hub |
 | Port | `Port_#0005.Hub_#0004` |
 | `SafeRemovalRequired` | True |
-| `RemovalPolicy` | 3 (removable / surprise-removal expected) |
+| `RemovalPolicy` | 3 (removable, surprise removal expected) |
 
-**First real measurement of the project:** the enclosure negotiates **UASP**, not
-BOT. Windows bound `uaspstor` rather than `USBSTOR`. That is the good outcome and
-had never been observed before.
+**First real hardware measurement the project has ever had:** the enclosure
+negotiates **UASP**, not BOT — Windows bound `uaspstor`, not `USBSTOR`. That is
+the good outcome. Negotiated USB link speed not yet read; it needs the drive to
+be enumerated by the storage stack first (Open issue 2).
 
 ---
 
-## Phase 0 — build and unit tests
+## Phase 0 — build and unit tests — **PASS**
 
-### `cargo test --manifest-path core/Cargo.toml` — **FAIL**
+Ran with the rustup stable toolchain, 1.98.0. Two host problems had to be
+cleared first; both are described under Open issues, and neither was a defect in
+this repo.
 
-Never reached compilation. Dependency resolution rejected the toolchain:
+| Check | Result |
+|---|---|
+| `cargo test --manifest-path core/Cargo.toml` | **PASS** — 149 passed, 0 failed |
+| `cargo test --manifest-path watcher/Cargo.toml` | **PASS** — 20 passed, 0 failed (after one fix, below) |
+| `cargo clippy --manifest-path core/Cargo.toml --all-targets -- -D warnings` | **PASS** — clean |
+| `cargo clippy --manifest-path watcher/Cargo.toml --all-targets -- -D warnings` | **PASS** — clean |
+| `npm install` (tauri-ui) | **PASS** — 4 packages audited, 0 vulnerabilities |
+| `npm run build` + `cargo build --release` (tauri-ui) | in progress |
+
+### Bug found and fixed: a watcher test could never pass on Windows
+
+`cargo test` on the watcher failed one of 20:
+
+```
+test tags::tests::a_directory_named_the_long_way_round_is_still_that_tag ... FAILED
+panicked at src\tags.rs:179:39:
+tag directory: Os { code: 123, kind: InvalidFilename,
+  message: "Felaktig syntax för filnamn, katalognamn eller volymetikett." }
+```
+
+Cause: the test created a tag directory literally named `04:a2:24:b2`. A colon
+cannot appear in a Windows filename, so `create_dir_all` returned
+`ERROR_INVALID_NAME` (123). The test asserted correct behaviour — a tag
+directory named with punctuation still resolves from the plain UID — but chose a
+directory name that cannot exist on this platform. It had only ever run on
+Linux, where the name is legal.
+
+Not a production defect. `normalise` and `resolve_in` are correct; nothing that
+ships was wrong.
+
+Fix: name the directory `04-a2-24-b2`. Same behaviour under test, legal on both
+platforms. The colon form is a *lookup* rather than a directory name, and is
+already covered as one by `a_tag_resolves_to_its_directory` and
+`a_uid_is_reduced_to_its_hex_digits`.
+
+Commit `9cbbc69`. Re-verified: 20 passed, 0 failed.
+
+---
+
+## Open issues
+
+### Open issue 1 — two Rust installations, and the old one wins on PATH
+
+The machine has both:
+
+- `C:\Program Files\Rust stable MSVC 1.87` — standalone MSI, **rustc 1.87.0**, first on PATH.
+- rustup at `C:\Users\Harry\.cargo\bin\rustup.exe`, toolchain `stable-x86_64-pc-windows-msvc` = **rustc 1.98.0**.
+
+A plain `cargo test` picks 1.87 and dies during resolution, because the
+committed lockfiles pin `icu_* 2.3.0`, which declare `rust-version = 1.88`:
 
 ```
 error: rustc 1.87.0 is not supported by the following packages:
   icu_collections@2.3.0 requires rustc 1.88
-  icu_locale_core@2.3.0 requires rustc 1.88
-  icu_normalizer@2.3.0 requires rustc 1.88
-  icu_normalizer_data@2.3.0 requires rustc 1.88
-  icu_properties@2.3.0 requires rustc 1.88
-  icu_properties_data@2.3.0 requires rustc 1.88
-  icu_provider@2.3.0 requires rustc 1.88
+  ...
 ```
 
-Diagnosis: `core/Cargo.lock` is committed with `icu_* 2.3.0` pinned. Those crates
-declare `rust-version = 1.88`. The installed toolchain is 1.87.0. The `icu_*` tree
-is pulled in transitively: `ureq` → `rustls` / `webpki-roots` → `idna_adapter` →
-`icu_*`. Nothing in the repo asks for it directly.
+The `icu_*` tree is transitive: ureq, then url, then idna, then idna_adapter,
+then icu_*. Nothing in this repo asks for it directly.
 
-The repo has **no `rust-toolchain.toml`**, so nothing pinned the toolchain and
-nothing warned that 1.88 is the real floor. CI on Windows evidently runs a newer
-stable, which is why this never surfaced.
+Everything in this report was run with `%USERPROFILE%\.cargo\bin` prepended to
+PATH, which selects 1.98 and builds fine. **Nothing in the repo needs changing
+for this.** It is a host PATH-ordering problem.
 
-Status: **blocked**, awaiting a decision on the fix (see Blocker 1).
-Not yet run, because they share the same dependency tree: watcher tests, both
-clippy runs, the `tauri-ui` build.
+Worth deciding — your call, not done:
 
----
+- Uninstall "Rust 1.87 (MSVC 64-bit)" from Add/Remove Programs, so the rustup
+  shims are the only Rust on PATH. Recommended; two Rusts on one PATH will keep
+  biting.
+- And/or commit a `rust-toolchain.toml` pinning `stable`, so the real floor is
+  stated in the repo instead of being discovered like this. The repo currently
+  has no toolchain file and no stated MSRV.
 
-## Blockers — need a decision
+### Open issue 2 — the cartridge drive is not enumerated by the storage stack
 
-### Blocker 1 — toolchain too old for the committed lockfiles
-
-Options:
-
-1. **Install rustup and move to current stable.** Correct fix. rustc 1.87 is from
-   May 2025. Tauri 2 and the rest of the tree will keep drifting past it. Changes
-   the machine (installs rustup, and rustup and a standalone MSI Rust on the same
-   PATH need the MSI one removed or ordered after).
-2. **Pin the dependencies down** with `cargo update --precise` across all three
-   lockfiles until the tree builds on 1.87. Keeps the machine untouched. It edits
-   committed lockfiles, may cascade through `idna`/`rustls`, and CI will drift
-   back the moment anything is re-resolved.
-
-Recommendation: option 1, plus commit a `rust-toolchain.toml` so the floor is
-stated in the repo rather than discovered like this.
-
-### Blocker 2 — the cartridge drive is unconfirmed and invisible to the storage stack
-
-`\.\PHYSICALDRIVE4` is present and healthy at the PnP and WMI layers, but the
-Windows storage stack does not enumerate it at all:
+`\\.\PHYSICALDRIVE4` is present and healthy at the PnP and WMI layers, but the
+Windows storage stack does not list it:
 
 - `Get-CimInstance Win32_DiskDrive` — lists it, `Status = OK`.
-- `Get-PnpDevice` — lists it and its UAS parent, `Status = OK`, `Present = True`,
-  `Problem = CM_PROB_NONE`.
-- `Get-Disk` / `MSFT_Disk` — **does not list it.** Only disks 0–3 appear, before
-  and after `Update-HostStorageCache`.
+- `Get-PnpDevice` — lists it and its UAS parent, `Status = OK`, `Present = True`, `Problem = CM_PROB_NONE`.
+- `Get-Disk` / `MSFT_Disk` — **does not list it.** Only disks 0-3, before and after `Update-HostStorageCache`.
 
-An uninitialised disk normally still appears in `Get-Disk` with
-`PartitionStyle = RAW`. This one does not appear at all. Possible causes: the
-enclosure is enumerating but the NVMe inside is not responding to the bridge; the
-disk is in a state the storage service will only resolve with elevation; or a
-stale enumeration that a physical replug would clear.
+An uninitialised disk normally still appears in `Get-Disk` as
+`PartitionStyle = RAW`. This one does not appear at all, so `Initialize-Disk`
+has nothing to address.
 
-Cannot proceed to Phase 1 until this is identified and confirmed to be the empty
-drive. Nothing destructive attempted.
+Possible causes, untested: the NVMe inside the enclosure is not responding to
+the bridge; the storage service will only resolve it with elevation; or a stale
+enumeration that a physical replug would clear.
 
-### Blocker 3 — session is not elevated
+Blocks Phase 1 onward. Nothing destructive has been attempted, and no drive
+letter has been chosen.
 
-`IsInRole(Administrator) = False`. Needed for: initialising the disk and creating
-a partition, formatting, `FSCTL_LOCK_VOLUME` / `FSCTL_DISMOUNT_VOLUME` on eject,
-Defender exclusions, and the watcher install in `gamepak-windows.ps1`.
+### Open issue 3 — the session is not elevated
+
+`IsInRole(Administrator) = False`. Needed for: initialising the disk and
+creating a partition, formatting, `FSCTL_LOCK_VOLUME` and
+`FSCTL_DISMOUNT_VOLUME` on eject, Defender exclusions, and the watcher install
+in `gamepak-windows.ps1`.
+
+### Open issue 4 (host, now cleared) — corrupt cargo registry cache
+
+Under rustc 1.98 the first builds still failed, differently:
+
+```
+error: invalid key
+ --> ...\registry\src\index.crates.io-...\hashbrown-0.17.1\Cargo.toml:1:1
+error: failed to download `hashbrown v0.17.1`
+```
+
+The cached `Cargo.toml` was 3847 bytes of **NUL**, with a bogus mtime of
+`Jul 24 2006`. A scan of `~/.cargo/registry/src` found **167 of 254** extracted
+crates with zeroed manifests — the signature of an unclean shutdown or power
+loss while cargo was writing, and nothing to do with this project.
+
+Cleared by deleting `~/.cargo/registry/src` (187.9 MB) and
+`~/.cargo/registry/cache` (31.0 MB) and letting cargo re-fetch, plus
+`cargo clean` on all three crates to drop 744.6 MB of artifacts built by the old
+1.87 toolchain, which produced `error[E0786]: found invalid metadata files for
+crate ...`.
+
+Worth noting for the host: **C: has 23.3 GB free of 930.5 GB.** A read-only
+`chkdsk C: /scan` would be a reasonable precaution given the corruption pattern.
+Not run — needs elevation.
 
 ---
 
@@ -140,8 +196,8 @@ Defender exclusions, and the watcher install in `gamepak-windows.ps1`.
 
 | Phase | Status |
 |---|---|
-| 0 — build and unit tests | **FAIL** — blocked on toolchain |
-| 1 — prepare the NVMe | **Blocked** — drive not enumerated by storage stack |
+| 0 — build and unit tests | **PASS** (1 bug found and fixed; tauri-ui build in progress) |
+| 1 — prepare the NVMe | **Blocked** — Open issue 2 |
 | 2 — wizard, non-destructive | Not started |
 | 3 — format and copy | Not started |
 | 4 — cartridge contents | Not started |
