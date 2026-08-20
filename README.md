@@ -19,7 +19,9 @@ Plug one in and a launcher appears with the game's cover art and two buttons.
 [![Windows Support](https://img.shields.io/badge/Windows-Supported-0078D4?logo=windows&logoColor=white)](#setup)
 [![Linux Support](https://img.shields.io/badge/Linux-Supported-FCC624?logo=linux&logoColor=black)](#setup)
 [![Steam Deck Support](https://img.shields.io/badge/Steam_Deck-Supported-1A9FFF?logo=steamdeck&logoColor=white)](#setup)
-[![Works offline](https://img.shields.io/badge/Works-offline-2e7d52?logo=signal&logoColor=white)](#security)
+[![Works offline](https://img.shields.io/badge/Works-offline-2e7d52)](#security)
+[![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)](#working-on-it)
+[![Tauri 2](https://img.shields.io/badge/Tauri_2-24C8B8?logo=tauri&logoColor=white)](#working-on-it)
 
 <img width="420" alt="The cartridge launcher: cover art filling the window, the game title, and Play and Eject buttons" src="docs/launcher.png" />
 
