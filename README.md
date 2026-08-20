@@ -54,7 +54,8 @@ Then plug a drive in, or run `pc-gamepak --create` to make one.
 &nbsp;&nbsp;[The idea](#the-idea) ·
 [The launcher](#the-launcher) ·
 [Making a cartridge](#making-a-cartridge) ·
-[Getting the most out of a cartridge](#performance)
+[Getting the most out of a cartridge](#performance) ·
+[Tags instead of drives](#tags)
 
 **Building one**
 &nbsp;&nbsp;[Hardware](#hardware) ·
@@ -437,6 +438,105 @@ takes, not how the game runs.
 
 </details>
 
+<a id="tags"></a>
+<details>
+<summary><b>Tags instead of drives</b> — NFC, for the games already installed</summary>
+<br />
+
+A GamePak carries the game. A **tag** only points at one that is already
+installed: put it on a reader and the same launcher opens, with the same artwork
+and the same Play button. Lift it off and the window closes.
+
+The two are not competing. A drive is the only one that travels; a tag is the
+only one that makes sense for a shelf of thirty games, or for a 150 GB install
+that would never fit on a 2230.
+
+| | Drive cartridge | Tag |
+|---|---|---|
+| Carries the game | yes | no — must already be installed |
+| Works on someone else's PC | yes | only if they own the game too |
+| Cost per title | the price of a drive | pennies |
+| A 150 GB game | needs a big cartridge | fine |
+| Extra hardware | none | a reader |
+
+### What you need
+
+**A reader.** Anything that speaks PC/SC, which is essentially all of them — the
+ACS ACR122U is the common one. Nothing to install on Windows, where `WinSCard`
+is part of the OS; on Linux install `pcscd` (`pcsc-lite` on Arch,
+`libpcsclite1` + `pcscd` on Debian and Ubuntu).
+
+**Tags.** NTAG213/215/216 stickers or cards are the cheap, reliable choice.
+MIFARE Classic works too — only the UID is read, never the memory — so the
+blue cards that come with an RC522 kit are fine.
+
+### Turning it on
+
+Off until the directory exists, because a card reader is usually bought for
+something else and reading whatever is sitting on it uninvited would be rude:
+
+```bash
+mkdir -p ~/.local/state/pc-gamepak/tags          # Linux
+mkdir "%LOCALAPPDATA%\PC-GamePak\tags"           # Windows
+```
+
+Restart the watcher, or log out and back in. `PC_GAMEPAK_NFC=on` or `=off`
+overrides the directory check either way.
+
+### Setting up a tag
+
+There is **no wizard step for this yet** — a tag is a directory you create, named
+after its UID. The way to learn the UID is to tap the tag and read the log
+(`~/.local/state/pc-gamepak/watcher.log`, or `%LOCALAPPDATA%\PC-GamePak\`):
+
+```
+Virtual PCD 00 00: tag 04A224B2 is not set up. To use it, put a
+cartridge.conf in /home/you/.local/state/pc-gamepak/tags/04A224B2
+```
+
+Do exactly that. The file is the same `cartridge.conf` a real cartridge carries —
+see [Cartridge format](#cartridge-format) — so a tag can hold a collection as
+easily as a single game:
+
+```
+tags/04A224B2/cartridge.conf
+tags/04A224B2/cover.jpg
+```
+
+```ini
+title=God of War
+executable=steam://rungameid/1593500
+cover=cover.jpg
+```
+
+### A reader you build yourself
+
+Set `PC_GAMEPAK_NFC_SOURCE` to a serial device, a FIFO or a file, and anything
+that can print two kinds of line becomes a reader:
+
+```
+UID 04A224B2      a tag is on the reader
+GONE              it has been lifted off
+```
+
+Blank lines and `#` comments are ignored. That is an ESP32 and an RC522 —
+about six pounds of parts — in a few lines of firmware. On Windows this reads
+files rather than COM ports, which do not open usefully without baud settings;
+use a PC/SC reader there.
+
+### What it does not do
+
+- **Write tags.** Only the UID is read, and nothing is ever written to a card.
+  NDEF — putting the game *on* the tag, so it works on any PC that owns it — is
+  the obvious next step and is not built.
+- **Stop the game** when the tag is lifted. The window closes; a running game is
+  left alone, the same as pulling a drive.
+- **Authenticate anything.** A UID is a name, not a secret, and it can be cloned.
+  It decides which of *your* installed games to open, which is all it should be
+  trusted with.
+
+</details>
+
 <a id="hardware"></a>
 <details>
 <summary><b>Hardware</b> — 2230 NVMe, enclosures, and how fast that really is</summary>
@@ -625,15 +725,17 @@ units on Linux, or the logon task and install folder on Windows.
 <br />
 
 ```
-drive plugged in
-      │
-      ├─ Linux    udev rule ──▶ systemd unit ──▶ helper waits for the mount
-      └─ Windows  watcher (resident, ~2 MB) sees the volume arrive
-      │
-      ▼
-is there a cartridge.conf at the root?   ──no──▶  nothing happens
-      │ yes
-      ▼
+drive plugged in                          tag put on a reader
+      │                                         │
+      ├─ Linux    udev ──▶ systemd unit         └─ watcher, blocked in PC/SC,
+      └─ Windows  watcher sees the volume          asks the reader for the UID
+      │                                         │
+      ▼                                         ▼
+is there a cartridge.conf at the root?    is there one in tags/<UID>/ ?
+      │                    ╰──no──▶  nothing happens  ◀──no──╯
+      │ yes                                     │ yes
+      ╰───────────────────────┬─────────────────╯
+                              ▼
 launcher opens with the cover art
       │
       ├─ Play   ──▶ starts what cartridge.conf names, then closes
@@ -653,6 +755,7 @@ while it waits.
 |---|---|
 | **Linux** | **Nothing resident** with the system install: udev is already part of the OS, and the rule adds no process. The rootless install trades that for one process of about 2 MB, blocked in `poll()` on the mount table. |
 | **Windows** | **One process, ~2 MB, 0% CPU.** `pc-gamepak-watcher.exe` blocks on the Windows message queue — no polling, no timer. |
+| **[Tags](#tags)** | Only when switched on: one extra thread in that process, blocked in PC/SC, plus whatever the reader library maps in. Still no timer and no polling. It wakes every thirty seconds to re-check which readers exist, which costs one syscall. |
 
 The launcher is a webview, so it is not small *while it is on screen* — expect
 around 100 MB for the few seconds it is up, then it exits and gives all of it
@@ -774,7 +877,7 @@ Flatpak, Snap and Homebrew are not on that list yet and what would change it.
 
 <a id="thanks"></a>
 <details>
-<summary><b>Thanks</b> — the project this forked from, and a peer</summary>
+<summary><b>Thanks</b> — the project this forked from, and others on the same idea</summary>
 <br />
 
 This project began as a fork of
@@ -792,6 +895,14 @@ launcher and a create-cartridge wizard instead of per-game shell scripts, and a
 click-to-play model in place of the auto-execute-plus-allowlist one.
 
 ### Others working on the same idea
+
+**[TheStockPot/NFC-Cartridge-Player](https://github.com/TheStockPot/NFC-Cartridge-Player)**
+is where the tag idea above comes from, and it is worth seeing on its own terms:
+an ESP32 and an RC522 in a 3D-printed shell, reporting tag IDs to Home Assistant,
+which then dims the lights and starts the film. It is a smart-home project rather
+than a PC one, and no code is shared with it — its licence is GPL-3.0 against our
+MIT — but [the line-source protocol](#tags) exists so hardware built to that guide
+can drive this launcher instead.
 
 **[Uplinkpro/CartLaunchCompanion](https://github.com/Uplinkpro/CartLaunchCompanion)**
 takes the opposite half of this problem, and takes it further than this project

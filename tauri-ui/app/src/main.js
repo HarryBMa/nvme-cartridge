@@ -8,6 +8,7 @@
  *   parse_cartridge({ drivePath })            -> { title, cover, cover_path, executable, drive_path }
  *   launch_game({ executable, drivePath })    -> ()
  *   eject_drive({ drivePath })                -> ()
+ *   can_eject({ drivePath })                  -> bool
  *   cartridge_health({ drivePath })           -> { link, transport, usedPercent, warnings[] }
  *
  * `cover` arrives as a data URI already. There is no command that takes a path
@@ -278,10 +279,19 @@ function toast(message, isError = false) {
   toastTimer = setTimeout(() => el.toast.classList.remove("is-on"), 3400);
 }
 
+/**
+ * Whether this cartridge is on a drive at all.
+ *
+ * A tag is a cartridge that never moves: it resolves to a directory on this
+ * machine, so there is nothing to unmount and no button to offer. The backend
+ * refuses the command as well — this only keeps the window honest.
+ */
+let ejectable = true;
+
 function setBusy(busy) {
   el.play.disabled = busy || !cartridge?.executable;
-  el.eject.disabled = busy || !cartridge;
-  if (el.bundleEject) el.bundleEject.disabled = busy || !cartridge;
+  el.eject.disabled = busy || !cartridge || !ejectable;
+  if (el.bundleEject) el.bundleEject.disabled = busy || !cartridge || !ejectable;
   if (el.gameList && !el.gameList.hidden) {
     for (const btn of el.gameList.querySelectorAll(".game-row__play")) {
       btn.disabled = busy;
@@ -324,7 +334,7 @@ function fail(headline, detail) {
   el.notice.hidden = false;
   el.notice.textContent = detail;
   el.play.disabled = true;
-  el.eject.disabled = !cartridge;
+  el.eject.disabled = !cartridge || !ejectable;
 }
 
 async function init() {
@@ -342,6 +352,19 @@ async function init() {
     fail("Unreadable", String(error));
     await showWindow();
     return;
+  }
+
+  // A tag has no drive behind it, so Eject goes away rather than failing when
+  // pressed. If the backend cannot answer, assume there is a drive: an old
+  // build that does not know the command should keep the button it had.
+  try {
+    ejectable = Boolean(await invoke("can_eject", { drivePath }));
+  } catch {
+    ejectable = true;
+  }
+  if (!ejectable) {
+    el.eject.hidden = true;
+    if (el.bundleEjectRow) el.bundleEjectRow.hidden = true;
   }
 
   el.title.textContent = cartridge.title || "Unknown game";
@@ -365,8 +388,8 @@ async function init() {
   if (cartridge.isBundle && cartridge.games?.length > 0) {
     document.getElementById("button-row").hidden = true;
     el.gameList.hidden = false;
-    el.bundleEjectRow.hidden = false;
-    el.bundleEject.disabled = false;
+    el.bundleEjectRow.hidden = !ejectable;
+    el.bundleEject.disabled = !ejectable;
     el.eyebrow.textContent = `Collection · ${cartridge.games.length} games`;
     renderGameList(cartridge.games);
   }
@@ -595,7 +618,9 @@ document.addEventListener("keydown", (event) => {
    Opened outside Tauri, the page serves a sample cartridge so the window can
    be designed and reviewed without a physical drive:
        npx http-server tauri-ui  →  http://localhost:8080/?drive=/demo
-   Append &state=noexec to see the nothing-to-play case.
+   Append &state=noexec to see the nothing-to-play case, &state=bundle for a
+   collection, and &tag=1 for a cartridge that is a tag rather than a drive —
+   which composes with the others.
    ========================================================================== */
 
 async function demoInvoke(command, args) {
@@ -638,6 +663,10 @@ async function demoInvoke(command, args) {
         isBundle: false,
         games: [],
       };
+    case "can_eject":
+      // A tag resolves to a directory on this machine; there is no drive to
+      // unmount and the button should not be there.
+      return !new URLSearchParams(location.search).has("tag");
     case "cartridge_health":
       // The preview shows the case worth designing for: a link that is fine,
       // a transport that is not, and a drive with no room left.

@@ -17,14 +17,21 @@
 //!
 //! Flow: volume arrives -> is there a cartridge.conf on it? -> start the
 //! launcher with `--drive X:\` and go back to sleep.
+//!
+//! A tag on an NFC reader is the same flow with a different doorbell: the UID
+//! names a directory holding a `cartridge.conf`, and the launcher is opened on
+//! that instead. Off unless a tags directory exists — see `nfc.rs`.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod launcher;
 #[cfg(not(windows))]
 mod linux;
 mod log;
 #[cfg(not(windows))]
 mod mounts;
+mod nfc;
+mod tags;
 
 #[cfg(not(windows))]
 fn main() {
@@ -42,7 +49,6 @@ mod windows_watcher {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
-    use std::process::Command;
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
@@ -96,6 +102,10 @@ mod windows_watcher {
 
     pub fn run() {
         crate::log::line("watcher starting");
+
+        // Its own thread: this one is about to block in the message queue for
+        // the rest of the session, and PC/SC has its own blocking call.
+        crate::nfc::spawn();
 
         *SEEN.lock().expect("no other thread to poison it") = Some(HashMap::new());
 
@@ -232,9 +242,8 @@ mod windows_watcher {
             seen.insert(letter, now);
         }
 
-        match start_launcher(&root) {
-            Ok(()) => crate::log::line(&format!("{letter}: opened the launcher")),
-            Err(e) => crate::log::line(&format!("{letter}: could not start the launcher: {e}")),
+        if crate::launcher::open(&root).is_some() {
+            crate::log::line(&format!("{letter}: opened the launcher"));
         }
     }
 
@@ -251,25 +260,6 @@ mod windows_watcher {
             }
         }
         false
-    }
-
-    /// Start the launcher next to this executable and do not wait for it.
-    fn start_launcher(root: &Path) -> std::io::Result<()> {
-        let exe = std::env::current_exe()?
-            .parent()
-            .ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::NotFound, "no install directory")
-            })?
-            .join("pc-gamepak.exe");
-
-        Command::new(exe)
-            .arg("--drive")
-            .arg(root)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()?;
-        Ok(())
     }
 
     fn wide(s: &str) -> Vec<u16> {

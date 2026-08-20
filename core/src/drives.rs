@@ -49,6 +49,39 @@ pub fn is_writable_target(mount: &Path) -> bool {
     }
 }
 
+/// Whether this path is something that can be ejected at all.
+///
+/// A cartridge is not always a drive. A tag — see the watcher's `tags` module —
+/// resolves to a directory in the user's own state folder, and the launcher
+/// opens it exactly as it would a mount point, because to everything upstream
+/// of this it *is* one.
+///
+/// Eject is where that stops being true. Handed a folder on the system disk,
+/// `findmnt` cheerfully reports the device holding it, and the next step would
+/// be asking udisks to unmount the user's home. udisks would almost certainly
+/// refuse — but "the layer below will probably say no" is not a check.
+pub fn is_ejectable(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        // A volume root, `D:\`, and nothing longer. A folder on C: is not a
+        // volume and has no business being dismounted.
+        let text = path.to_string_lossy();
+        let trimmed = text.trim_end_matches(['\\', '/']);
+        trimmed.len() == 2
+            && trimmed.ends_with(':')
+            && trimmed
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic())
+    }
+    #[cfg(unix)]
+    {
+        // The same allowlist the wizard writes through: somewhere a desktop
+        // automounts removable media, and never the system.
+        is_writable_target(path)
+    }
+}
+
 /// Filesystems that can never hold a cartridge.
 pub fn is_pseudo_filesystem(fs: &str) -> bool {
     matches!(
@@ -353,6 +386,37 @@ mod windows_impl {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn only_a_removable_mount_can_be_ejected() {
+        assert!(is_ejectable(Path::new("/run/media/harry/CINDER")));
+        assert!(is_ejectable(Path::new("/media/HOLLOW")));
+
+        // A tag's virtual cartridge lives here, and there is nothing to eject.
+        assert!(!is_ejectable(Path::new(
+            "/home/harry/.local/state/pc-gamepak/tags/04A224B2"
+        )));
+        assert!(!is_ejectable(Path::new("/home/harry")));
+        assert!(!is_ejectable(Path::new("/")));
+        // The automount root itself is not a cartridge either.
+        assert!(!is_ejectable(Path::new("/run/media")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn only_a_volume_root_can_be_ejected() {
+        assert!(is_ejectable(Path::new("D:\\")));
+        assert!(is_ejectable(Path::new("D:")));
+        assert!(is_ejectable(Path::new("d:/")));
+
+        // Where a tag's virtual cartridge lives.
+        assert!(!is_ejectable(Path::new(
+            "C:\\Users\\harry\\AppData\\Local\\PC-GamePak\\tags\\04A224B2"
+        )));
+        assert!(!is_ejectable(Path::new("C:\\Users")));
+        assert!(!is_ejectable(Path::new("\\\\server\\share")));
+    }
 
     #[test]
     fn parses_proc_mounts() {

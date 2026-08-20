@@ -44,10 +44,18 @@ connection health. Nothing on a cartridge runs without a click.
 choose what goes on it, Write. Formatting, copying, collections, artwork by file
 picker or SteamGridDB, per-cartridge Windows tuning.
 
-### `watcher/` — both platforms, 13 tests
+### `watcher/` — both platforms, 28 tests
 
 **Windows:** a hidden top-level window blocking on `WM_DEVICECHANGE`. No polling,
 no timer, about 2 MB resident.
+
+**Tags:** a second doorbell, on its own thread. PC/SC — `WinSCard` on Windows,
+`libpcsclite` on Linux — loaded at runtime by name rather than linked, so a
+machine without a reader has no tag support instead of a watcher that will not
+start. The UID names a directory holding an ordinary `cartridge.conf`, which is
+why the launcher needed no changes at all. Off unless the tags directory exists.
+A line source (`UID <hex>` / `GONE` on a serial device or FIFO) covers readers
+people build themselves, and is how the path is tested without hardware.
 
 **Linux:** blocks in `poll()` on `/proc/self/mountinfo`, which the kernel wakes on
 any mount activity. Used only by the rootless install — the system install has
@@ -85,11 +93,14 @@ Ranked by how much it matters.
 3. **Version numbers.** Three crates all saying `0.1.0`, moved by hand.
 4. **Adding a game to an existing cartridge** still means writing it again.
    Editing covers everything that does not move files; adding one does.
-5. **Verifying a cartridge you already have.** The manifest is written and
+5. **Programming a tag from the wizard.** A virtual cartridge is a directory
+   made by hand; the wizard has no step for it, and nothing writes NDEF onto the
+   tag so that it would work on another PC.
+6. **Verifying a cartridge you already have.** The manifest is written and
    checked at copy time, but nothing yet re-checks a cartridge on demand — the
    pieces are all in `verify`, it needs a command and a button.
-6. **Windows code signing.** Unsigned means SmartScreen on every download.
-7. **macOS** is not supported at all — no watcher, no installer, no icons.
+7. **Windows code signing.** Unsigned means SmartScreen on every download.
+8. **macOS** is not supported at all — no watcher, no installer, no icons.
 
 ## The rootless Linux install
 
