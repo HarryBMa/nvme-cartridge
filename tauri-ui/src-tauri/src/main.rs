@@ -148,9 +148,25 @@ fn open_uri(uri: &str) -> Result<(), String> {
     }
 }
 
+/// Can this cartridge be ejected, or is it a tag standing in for one?
+///
+/// The launcher hides the button when the answer is no. `eject_drive` asks the
+/// same question again rather than trusting it: a command is reachable whatever
+/// the interface chose to show.
+#[tauri::command]
+fn can_eject(drive_path: String) -> bool {
+    drives::is_ejectable(std::path::Path::new(&drive_path))
+}
+
 /// Safely eject the cartridge drive.
 #[tauri::command]
 fn eject_drive(drive_path: String) -> Result<(), String> {
+    if !drives::is_ejectable(std::path::Path::new(&drive_path)) {
+        return Err(
+            "This cartridge is not on a removable drive, so there is nothing to eject.".to_string(),
+        );
+    }
+
     #[cfg(target_os = "windows")]
     {
         eject_windows(&drive_path)
@@ -541,6 +557,7 @@ fn main() {
             parse_cartridge,
             launch_game,
             eject_drive,
+            can_eject,
             list_games,
             game_cover,
             get_settings,

@@ -20,9 +20,9 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{Duration, Instant};
 
+use crate::launcher;
 use crate::log;
 use crate::mounts::{self, Mount};
 
@@ -40,6 +40,11 @@ const MOUNTS: &str = "/proc/self/mounts";
 
 pub fn run() -> ! {
     log::line("watcher starting (mount table)");
+
+    // A tag on a reader is the other way a cartridge can arrive. Its own
+    // thread, because this one is about to block in poll() indefinitely and
+    // PC/SC has a blocking call of its own. Does nothing unless asked for.
+    crate::nfc::spawn();
 
     let Ok(watch) = std::fs::File::open(MOUNTINFO) else {
         log::line("could not open /proc/self/mountinfo; is this Linux?");
@@ -81,7 +86,8 @@ pub fn run() -> ! {
                 }
             }
             recent.insert(arrived.clone(), now);
-            if let Some(child) = open_launcher_for(&arrived) {
+            log::line(&format!("cartridge detected at {}", arrived.display()));
+            if let Some(child) = launcher::open(&arrived) {
                 open.insert(arrived.clone(), child);
             }
         }
@@ -133,56 +139,6 @@ fn read_mounts() -> Vec<Mount> {
     }
 }
 
-/// Start the launcher on a cartridge, keeping the handle so the window can be
-/// closed again when the cartridge goes.
-fn open_launcher_for(mount: &Path) -> Option<std::process::Child> {
-    let Some(launcher) = launcher_path() else {
-        log::line("pc-gamepak is not installed anywhere I can find it");
-        return None;
-    };
-
-    log::line(&format!(
-        "cartridge detected at {}; opening {}",
-        mount.display(),
-        launcher.display()
-    ));
-
-    // Not waited on: the launcher outlives each wake and closes itself.
-    match Command::new(&launcher).arg("--drive").arg(mount).spawn() {
-        Ok(child) => {
-            log::line(&format!("launcher started, pid {}", child.id()));
-            Some(child)
-        }
-        Err(e) => {
-            log::line(&format!("could not start the launcher: {e}"));
-            None
-        }
-    }
-}
-
-/// Where the launcher was installed.
-///
-/// A rootless install puts it in ~/.local/bin; a system install in
-/// /usr/local/bin or /usr/bin. `PC_GAMEPAK_LAUNCHER` overrides all of it, which
-/// is what a Flatpak or a development build uses.
-fn launcher_path() -> Option<PathBuf> {
-    if let Some(from_env) = std::env::var_os("PC_GAMEPAK_LAUNCHER") {
-        let path = PathBuf::from(from_env);
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Some(home) = std::env::var_os("HOME") {
-        candidates.push(PathBuf::from(home).join(".local/bin/pc-gamepak"));
-    }
-    candidates.push(PathBuf::from("/usr/local/bin/pc-gamepak"));
-    candidates.push(PathBuf::from("/usr/bin/pc-gamepak"));
-
-    candidates.into_iter().find(|path| path.is_file())
-}
-
 /// Close the launcher window for a cartridge that has gone.
 ///
 /// The launcher this watcher started is closed by its own handle, which is
@@ -195,11 +151,8 @@ fn launcher_path() -> Option<PathBuf> {
 /// stale window.
 fn close_launcher_for(mount: &Path, ours: Option<std::process::Child>) {
     if let Some(mut child) = ours {
-        if matches!(child.try_wait(), Ok(None)) {
-            log::line(&format!("closing launcher pid {}", child.id()));
-            terminate(child.id() as i32);
-            // Reaped on the next wake by the retain() in the loop.
-        }
+        // Reaped on the next wake by the retain() in the loop.
+        launcher::close(&mut child);
         return;
     }
 

@@ -78,6 +78,8 @@ const el = {
   progressText: document.getElementById("progress-text"),
   status: document.getElementById("status"),
   optCopyLabel: document.getElementById("opt-copy-label"),
+  optCloseSteamRow: document.getElementById("opt-close-steam-row"),
+  optCloseSteam: document.getElementById("opt-close-steam"),
   optVerifyRow: document.getElementById("opt-verify-row"),
   optVerify: document.getElementById("opt-verify"),
   optTrimRow: document.getElementById("opt-trim-row"),
@@ -144,6 +146,8 @@ let settings = { steamgriddbEnabled: false, steamgriddbApiKey: "" };
 let collectionCover = null;
 /** The cartridge being edited, once one has been read. */
 let editing = null;
+/** True when Steam already lists the selected drive as a library folder. */
+let driveIsSteamLibrary = false;
 let sgdbSearchTimer = null;
 let sgdbResultsFor = [];
 let sgdbSelectedGameId = null;
@@ -687,10 +691,12 @@ async function selectDrive(drive) {
   // Offered only for a drive Steam currently knows about, since that is the only
   // case where there is anything to remove.
   try {
-    el.unregister.hidden = !(await invoke("steam_registration", { drivePath: drive.path }));
+    driveIsSteamLibrary = await invoke("steam_registration", { drivePath: drive.path });
   } catch {
-    el.unregister.hidden = true;
+    driveIsSteamLibrary = false;
   }
+  el.unregister.hidden = !driveIsSteamLibrary;
+  refreshOptions();
 
   // Editing is only on offer when there is something there to edit.
   el.btnEdit.hidden = !drive.hasCartridge;
@@ -756,6 +762,12 @@ function refreshOptions() {
     }
   }
   el.optCopyHint.textContent = hint;
+
+  // Only shown when Steam's library list is in play: this drive is already in
+  // it, or a Steam copy is about to add it.
+  const steamInvolved =
+    driveIsSteamLibrary || (el.optCopy.checked && chosen.some((g) => g.library === "steam"));
+  el.optCloseSteamRow.hidden = !steamInvolved;
 
   // Only meaningful when files are actually going across.
   el.optVerifyRow.hidden = !el.optCopy.checked;
@@ -1151,6 +1163,7 @@ async function writeCartridge() {
         formatLabel: el.formatLabel.value.trim() || null,
         formatConfirmation: el.formatConfirm.value.trim() || null,
         copyGame: el.optCopy.checked,
+        closeSteam: el.optCloseSteam.checked,
         verifyCopy: el.optVerify.checked,
         trimAfterWrite: el.optTrim.checked,
         collectionCoverSource: collectionCover?.path ?? null,
@@ -1178,6 +1191,7 @@ async function writeCartridge() {
         formatConfirmation: el.formatConfirm.value.trim() || null,
         copyGame: el.optCopy.checked,
         copyExecutable: el.exePick.hidden ? null : el.exeChoices.value || null,
+        closeSteam: el.optCloseSteam.checked,
         verifyCopy: el.optVerify.checked,
         trimAfterWrite: el.optTrim.checked,
       };
@@ -1198,6 +1212,10 @@ async function writeCartridge() {
           ? `Copied ${formatBytes(result.bytesCopied)} to ${result.gameFolder}.`
           : `Copied ${formatBytes(result.bytesCopied)}.`,
       );
+    }
+    if (result.steamClosed) parts.push("Steam was closed.");
+    if (result.steamEntryRemoved) {
+      parts.push("The old entry for this drive was taken out of Steam's library list.");
     }
     if (result.registeredWithSteam) parts.push("Registered with Steam.");
     if (result.verified) parts.push(result.verified);
@@ -1607,6 +1625,8 @@ async function demoInvoke(command, args) {
         gameCopied: args.request.copyGame,
         bytesCopied: args.request.copyGame ? 9_106_886_656 : 0,
         registeredWithSteam: args.request.copyGame && Boolean(args.request.appId),
+        steamClosed: Boolean(args.request.closeSteam),
+        steamEntryRemoved: true,
         gameFolder: args.request.copyGame
           ? args.request.appId
             ? "steamapps/common"
