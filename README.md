@@ -262,7 +262,12 @@ Steam-sourced cover usually leaves the default icon in place.
 
 - *Steam games* go to `steamapps/` and the drive is registered in Steam's
   `libraryfolders.vdf`, so Steam plays **from the cartridge** rather than your
-  internal copy. Close Steam first — it rewrites that file when it exits.
+  internal copy. Steam rewrites that file from memory when it exits, so it has to
+  be closed first — the wizard offers to do that for you, and does it before
+  anything on the drive is touched.
+- *Rewriting a cartridge Steam already knows about* takes the old entry out of
+  that list first, so a repurposed drive does not leave Steam pointing at a
+  library that no longer holds the game.
 - *Everything else* — GOG, itch, emulator builds, anything Playnite records an
   install folder for — is copied to `Games/<title>/` and Play is pointed at a
   file inside it. No launcher in the middle. The wizard ranks the executables it
@@ -693,8 +698,17 @@ A cartridge you copied a Steam game onto is registered in `libraryfolders.vdf`,
 labelled `PC GamePak`. Those entries are never removed automatically: a
 cartridge is *meant* to spend most of its life unplugged, so a missing folder is
 the normal state rather than stale cruft. When you reformat or repurpose one, the
-wizard offers **Remove this drive from Steam's library list**. Steam must be
-closed.
+wizard offers **Remove this drive from Steam's library list**.
+
+Either way Steam has to be closed, because it keeps that list in memory and
+writes it back out on exit — an edit made underneath a running Steam is simply
+overwritten. **Close Steam if it is in the way** (ticked by default, and only
+shown when the drive is or is about to be a Steam library) asks Steam to shut
+itself down and waits for it. That is a request, not a kill: Steam flushes
+`libraryfolders.vdf` and its download state on the way out, and killing it
+mid-write to its own config is how the file we came to fix gets corrupted. If it
+has not gone within 25 seconds the build stops and says so — and because this
+runs before the format, nothing has been changed yet.
 
 </details>
 

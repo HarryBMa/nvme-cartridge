@@ -127,6 +127,14 @@ pub struct CartridgeRequest {
     /// Absolute path to the collection's cover image for a bundle.
     #[serde(default)]
     pub collection_cover_source: Option<String>,
+    /// Close Steam if it is in the way.
+    ///
+    /// Steam holds its library list in memory and writes it out when it exits,
+    /// so rewriting a cartridge it knows about means closing it first. With this
+    /// set, Steam is asked to close itself and waited for; without it, the build
+    /// stops and says so before anything has been changed.
+    #[serde(default)]
+    pub close_steam: bool,
     /// Read the cartridge back after copying and check every file against the
     /// sum taken as it was written. One extra pass over the drive, so it is
     /// asked for rather than assumed.
@@ -193,6 +201,10 @@ pub struct CartridgeResult {
     pub trim: Option<String>,
     /// What came of the integrity check, when one was asked for.
     pub verified: Option<String>,
+    /// True when Steam was closed to get at its library list.
+    pub steam_closed: bool,
+    /// True when a stale entry for this drive was taken out of that list.
+    pub steam_entry_removed: bool,
     pub warnings: Vec<String>,
 }
 
@@ -402,6 +414,8 @@ pub fn create_cartridge(
         used_percent: 0,
         trim: None,
         verified: None,
+        steam_closed: false,
+        steam_entry_removed: false,
         warnings: Vec::new(),
     };
 
@@ -417,6 +431,21 @@ pub fn create_cartridge(
     if title.is_empty() {
         return Err("Give the cartridge a title.".into());
     }
+
+    // ---- 0. Steam's library list ----------------------------------------
+    //
+    // Rewriting a cartridge invalidates whatever Steam believed about it: the
+    // game that entry describes is about to be formatted over, replaced, or
+    // simply not be a Steam game any more. Left alone, Steam goes on listing a
+    // game that is no longer there and offering to play it.
+    //
+    // This runs before anything is written, so a Steam that will not close
+    // costs nothing — the alternative is discovering it after the drive has
+    // already been formatted.
+    let prepared = prepare_steam(request, &root, progress)?;
+    result.steam_closed = prepared.closed;
+    result.steam_entry_removed = prepared.entry_removed;
+    warnings.extend(prepared.warnings);
 
     // ---- 1. Format ------------------------------------------------------
     if request.format_drive {
@@ -816,6 +845,106 @@ fn finish(
             health.used_percent
         ));
     }
+}
+
+/// Will this build put the drive into Steam's library list?
+///
+/// True only when files are actually being copied *and* at least one of them is
+/// a Steam game — both shapes of request can carry one, a single game at the top
+/// level and a collection per game.
+fn will_register_with_steam(request: &CartridgeRequest) -> bool {
+    if !request.copy_game {
+        return false;
+    }
+    if request.app_id.as_deref().is_some_and(is_numeric) {
+        return true;
+    }
+    request.games.as_deref().is_some_and(|games| {
+        games
+            .iter()
+            .any(|game| game.app_id.as_deref().is_some_and(is_numeric))
+    })
+}
+
+/// What had to happen to Steam before the cartridge could be written.
+struct SteamPrepared {
+    closed: bool,
+    entry_removed: bool,
+    warnings: Vec<String>,
+}
+
+/// Get Steam out of the way, and take this drive out of its library list.
+///
+/// Both halves are conditional: there is nothing to do unless Steam is
+/// installed and either already knows about this drive or is about to.
+fn prepare_steam(
+    request: &CartridgeRequest,
+    root: &Path,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<SteamPrepared, String> {
+    let mut prepared = SteamPrepared {
+        closed: false,
+        entry_removed: false,
+        warnings: Vec::new(),
+    };
+
+    let Some(steam_root) = steam::steam_root() else {
+        return Ok(prepared);
+    };
+
+    let registered = steamlib::is_registered(&steam_root, root);
+    // A Steam copy will want to add this drive at the end, which is the same
+    // file and so the same requirement.
+    if !registered && !will_register_with_steam(request) {
+        return Ok(prepared);
+    }
+
+    if steamlib::steam_is_running() {
+        if !request.close_steam {
+            return Err(
+                "Steam is running, and it rewrites its library list from memory when it exits, \
+                 so anything changed now would be undone. Close Steam, or tick \
+                 “Close Steam if it is in the way”."
+                    .to_string(),
+            );
+        }
+
+        progress(Progress {
+            step: "steam",
+            message: "Asking Steam to close…".to_string(),
+            done_bytes: 0,
+            total_bytes: 0,
+        });
+
+        match steamlib::shutdown_steam(&steam_root) {
+            steamlib::Shutdown::NotRunning => {}
+            steamlib::Shutdown::Exited => prepared.closed = true,
+            steamlib::Shutdown::StillRunning(why) => return Err(why),
+        }
+    }
+
+    // Now that it is closed, drop the entry describing what used to be here.
+    // A Steam copy adds a fresh one when it finishes; anything else leaves the
+    // drive out of the list, which is correct, because it no longer holds the
+    // game Steam thought it did.
+    if registered {
+        progress(Progress {
+            step: "steam",
+            message: "Taking the old cartridge out of Steam's library list…".to_string(),
+            done_bytes: 0,
+            total_bytes: 0,
+        });
+
+        match steamlib::unregister_library(&steam_root, root) {
+            Ok(true) => prepared.entry_removed = true,
+            Ok(false) => {}
+            Err(e) => prepared
+                .warnings
+                .push(format!("Steam's library list was not updated: {e}")),
+        }
+    }
+
+    Ok(prepared)
 }
 
 /// What a copy produced.
@@ -1527,6 +1656,47 @@ mod tests {
         assert!(err.contains("not a removable drive"), "{err}");
         // Crucially, it bailed before the format step emitted anything.
         assert!(seen.is_empty(), "{seen:?}");
+    }
+
+    #[test]
+    fn steam_is_only_disturbed_when_its_library_list_is_going_to_change() {
+        // Not copying anything: Steam has no idea this is happening.
+        let mut request = CartridgeRequest {
+            app_id: Some("367520".into()),
+            copy_game: false,
+            ..Default::default()
+        };
+        assert!(!will_register_with_steam(&request));
+
+        // Copying a Steam game does add the drive to the list.
+        request.copy_game = true;
+        assert!(will_register_with_steam(&request));
+
+        // A GOG or itch game is copied without Steam ever hearing about it.
+        request.app_id = Some("b7f3-tunic".into());
+        assert!(!will_register_with_steam(&request));
+        request.app_id = None;
+        assert!(!will_register_with_steam(&request));
+
+        // A collection counts if any one of its games is a Steam game.
+        request.games = Some(vec![
+            BundleGameRequest {
+                playnite_id: Some("b7f3-tunic".into()),
+                ..Default::default()
+            },
+            BundleGameRequest {
+                app_id: Some("1593500".into()),
+                ..Default::default()
+            },
+        ]);
+        assert!(will_register_with_steam(&request));
+
+        // And a collection of non-Steam games does not.
+        request.games = Some(vec![BundleGameRequest {
+            playnite_id: Some("b7f3-tunic".into()),
+            ..Default::default()
+        }]);
+        assert!(!will_register_with_steam(&request));
     }
 
     #[test]

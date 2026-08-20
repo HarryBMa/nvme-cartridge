@@ -158,6 +158,20 @@
             <p class="field__hint" id="exe-hint"></p>
           </div>
 
+          <label class="opt" id="opt-close-steam-row" hidden>
+            <input id="opt-close-steam" type="checkbox" checked />
+            <span class="opt__body">
+              <span class="opt__label">Close Steam if it is in the way</span>
+              <span class="opt__hint">
+                Steam keeps its library list in memory and writes it out when it
+                exits, so a cartridge it knows about cannot be rewritten while it
+                is running. This asks Steam to close itself and waits — it is not
+                a kill, so anything downloading finishes writing first. Untick it
+                and the build stops instead, before anything is changed.
+              </span>
+            </span>
+          </label>
+
           <label class="opt" id="opt-verify-row" hidden>
             <input id="opt-verify" type="checkbox" />
             <span class="opt__body">

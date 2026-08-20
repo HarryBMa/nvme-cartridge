@@ -5,7 +5,7 @@ repository rather than in a chat log so it stays honest.
 
 ## What is built
 
-### `core/` — `gamepak-core`, 137 tests
+### `core/` — `gamepak-core`, 156 tests
 
 No Tauri, no UI, no display. That is the point: every decision the launcher and
 the wizard make is testable on any machine, in CI, without a webview.
@@ -13,7 +13,7 @@ the wizard make is testable on any machine, in CI, without a webview.
 | Module | What it does |
 |---|---|
 | `cartridge` | Reads a cartridge: `cartridge.conf` (single game, or `[collection]` + `[game]` sections) and legacy `autorun.inf` for label and icon only. Inline INI parser, path confinement, cover inlined as a `data:` URI under an 8 MB cap. |
-| `create` | The build pipeline: format → copy → check the launch target → cover art → `cartridge.conf` → `autorun.inf` → trim and report. Game lists from Playnite and Steam, collection naming, per-game covers. |
+| `create` | The build pipeline: close Steam and drop its stale entry → format → copy → check the launch target → cover art → `cartridge.conf` → `autorun.inf` → trim and report. Game lists from Playnite and Steam, collection naming, per-game covers. |
 | `edit` | Rewrites a cartridge's metadata — name, artwork, which games are listed and in what order — without copying or deleting anything. |
 | `drives` | Which volumes may be written to — an allowlist of automount locations, never a denylist. Parses `/proc/mounts`; Win32 volume APIs on Windows. |
 | `format` | exFAT and btrfs, behind four gates: removable allowlist re-derived here, not the system drive, the current label typed back exactly, and explicitly asked for. |
@@ -23,7 +23,7 @@ the wizard make is testable on any machine, in CI, without a webview.
 | `settings` | What the user has switched on, stored beside the artwork cache. Everything defaults to off. |
 | `sgdb` | SteamGridDB artwork search, download and cache. Refuses every request until the user opts in and supplies a key. |
 | `steam` | Steam's own manifests: `libraryfolders.vdf`, `appmanifest_*.acf`, the library cache for covers. Hand-written KeyValues parser. |
-| `steamlib` | Copies a Steam game onto a cartridge and registers the drive as a Steam library, so Steam plays from the cartridge. |
+| `steamlib` | Copies a Steam game onto a cartridge and registers the drive as a Steam library, so Steam plays from the cartridge. Also unregisters one, and asks a running Steam to shut down so those edits survive its exit. |
 | `trim` | Tells the drive which blocks it no longer has to keep. Treats "this enclosure will not" as a fact, not a failure. |
 | `tuning` | The Windows settings worth changing per cartridge, the commands they run, and their exact opposites. |
 | `verify` | CRC-32, taken as each file is copied and checked by reading the cartridge back. Leaves a manifest so the same check can be run later without the original. |

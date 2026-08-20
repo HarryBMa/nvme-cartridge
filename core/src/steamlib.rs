@@ -321,6 +321,117 @@ pub fn steam_is_running() -> bool {
     }
 }
 
+/// What came of asking Steam to close.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Shutdown {
+    /// It was not running in the first place.
+    NotRunning,
+    /// It was asked, and it went.
+    Exited,
+    /// It is still there. The message says what was tried.
+    StillRunning(String),
+}
+
+/// How long to wait for Steam to finish what it was doing.
+///
+/// Generous on purpose: Steam flushes downloads, cloud saves and its own
+/// configuration on the way out, and hurrying that is how the file we are about
+/// to edit gets corrupted.
+const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(25);
+const SHUTDOWN_POLL: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Ask Steam to close, and wait for it.
+///
+/// Steam holds `libraryfolders.vdf` in memory and writes it out when it exits,
+/// so any edit made while it runs is silently reverted a few minutes later. The
+/// only way to change that file reliably is to have Steam gone first.
+///
+/// Deliberately not a kill. `-shutdown` is Steam's own "close yourself"
+/// argument, which lets it write its state and *then* leave — after which our
+/// edit is the last word. Killing it outright would leave whatever it was doing
+/// half-finished, and killing it mid-write to its own config is precisely how
+/// the file we came to fix gets damaged. If it will not go, that is reported
+/// rather than forced.
+pub fn shutdown_steam(steam_root: &Path) -> Shutdown {
+    if !steam_is_running() {
+        return Shutdown::NotRunning;
+    }
+
+    let mut asked = false;
+    for (program, args) in shutdown_commands(steam_root) {
+        if std::process::Command::new(&program)
+            .args(&args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .is_ok()
+        {
+            asked = true;
+            break;
+        }
+    }
+
+    if !asked {
+        return Shutdown::StillRunning(
+            "Steam is running and its own shutdown command could not be found. \
+             Close Steam and try again."
+                .to_string(),
+        );
+    }
+
+    let deadline = std::time::Instant::now() + SHUTDOWN_GRACE;
+    while std::time::Instant::now() < deadline {
+        std::thread::sleep(SHUTDOWN_POLL);
+        if !steam_is_running() {
+            // It writes its configuration on the way out; give the last write a
+            // moment to land before reading the file back.
+            std::thread::sleep(std::time::Duration::from_millis(750));
+            return Shutdown::Exited;
+        }
+    }
+
+    Shutdown::StillRunning(format!(
+        "Steam was asked to close but was still running {} seconds later — it may be mid-download, \
+         or waiting on a dialog. Close it yourself and try again.",
+        SHUTDOWN_GRACE.as_secs()
+    ))
+}
+
+/// The ways to ask Steam to close, best first.
+///
+/// Split out so the argument order can be read and tested without a Steam
+/// installation to point at.
+pub fn shutdown_commands(steam_root: &Path) -> Vec<(String, Vec<String>)> {
+    let shutdown = vec!["-shutdown".to_string()];
+
+    #[cfg(windows)]
+    {
+        vec![
+            (
+                steam_root.join("steam.exe").to_string_lossy().into_owned(),
+                shutdown.clone(),
+            ),
+            ("steam.exe".to_string(), shutdown),
+        ]
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = steam_root;
+        vec![
+            ("steam".to_string(), shutdown.clone()),
+            (
+                "flatpak".to_string(),
+                vec![
+                    "run".to_string(),
+                    "com.valvesoftware.Steam".to_string(),
+                    "-shutdown".to_string(),
+                ],
+            ),
+        ]
+    }
+}
+
 /// Copy a directory tree, reporting bytes copied as it goes.
 ///
 /// A game is tens of gigabytes, so the callback lets the window show progress
@@ -405,6 +516,46 @@ pub fn tree_size(path: &Path) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn steam_is_asked_to_close_itself_rather_than_killed() {
+        let commands = shutdown_commands(Path::new("/home/harry/.local/share/Steam"));
+        assert!(!commands.is_empty());
+
+        // Every candidate is Steam's own shutdown argument. Nothing in here
+        // kills a process: Steam writes its configuration on the way out, and
+        // that write is the one that must happen before ours.
+        for (program, args) in &commands {
+            assert!(
+                args.iter().any(|a| a == "-shutdown"),
+                "{program} {args:?} is not a shutdown request"
+            );
+            let lowered = program.to_lowercase();
+            assert!(
+                !lowered.contains("kill") && !lowered.contains("taskkill"),
+                "{program} kills rather than asks"
+            );
+        }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_flatpak_steam_is_reachable_too() {
+        let commands = shutdown_commands(Path::new("/home/harry/.local/share/Steam"));
+        assert_eq!(commands[0].0, "steam");
+        assert!(
+            commands.iter().any(|(program, args)| program == "flatpak"
+                && args.iter().any(|a| a == "com.valvesoftware.Steam")),
+            "{commands:?}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_installed_steam_is_preferred_over_whatever_is_on_the_path() {
+        let commands = shutdown_commands(Path::new("C:\\Program Files (x86)\\Steam"));
+        assert!(commands[0].0.ends_with("Steam\\steam.exe"), "{commands:?}");
+    }
 
     const SAMPLE: &str = r#"
 "libraryfolders"
