@@ -2,14 +2,15 @@
 
 <img src="docs/icon.png" width="96" alt="" />
 
-
-<a href="https://ko-fi.com/harrybma">Support my work!</a>
-
-
 # PC GamePak
 
 **Turn removable storage into physical game cartridges.**
 Plug one in and a launcher appears with the game's cover art and two buttons.
+
+[![CI](https://github.com/HarryBMa/pc-gamepak/actions/workflows/ci.yml/badge.svg)](https://github.com/HarryBMa/pc-gamepak/actions/workflows/ci.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/HarryBMa/pc-gamepak)](https://github.com/HarryBMa/pc-gamepak/releases)
+[![License](https://img.shields.io/github/license/HarryBMa/pc-gamepak)](LICENSE)
+[![Support on Ko-Fi](https://img.shields.io/badge/Support-Ko--Fi-F16061?logo=ko-fi&logoColor=white)](https://ko-fi.com/harrybma)
 
 <img width="420" alt="The cartridge launcher: cover art filling the window, the game title, and Play and Eject buttons" src="docs/launcher.png" />
 
