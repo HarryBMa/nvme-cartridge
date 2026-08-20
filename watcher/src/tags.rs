@@ -222,7 +222,11 @@ mod tests {
     #[test]
     fn a_directory_named_the_long_way_round_is_still_that_tag() {
         let root = scratch("punctuated");
-        let expected = tag(&root, "04:a2:24:b2");
+        // Dashes, not colons: a colon cannot appear in a Windows filename, so
+        // naming the directory the way a reader prints the UID only works on
+        // Linux. The colon form is a lookup, never a directory name, and is
+        // covered as one in `a_tag_resolves_to_its_directory`.
+        let expected = tag(&root, "04-a2-24-b2");
         assert_eq!(resolve_in(&root, "04A224B2"), Some(expected));
         std::fs::remove_dir_all(&root).ok();
     }
