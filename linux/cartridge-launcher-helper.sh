@@ -1,129 +1,76 @@
 #!/bin/bash
+#
+# Started by game-cartridge@.service when udev sees a partition appear.
+#
+# Its whole job is to wait for the desktop to mount the cartridge and then open
+# the launcher on it. Nothing is executed from the cartridge here: the launcher
+# shows the cover art and waits for the user to press Play.
+#
+# That is why there is no trust list any more. The old design auto-executed
+# launch.sh on insert, so it needed a SHA-256 allowlist to be safe. Now a human
+# clicks Play, which is a better gate than a hash of a file the same person
+# could rewrite.
 
-set -e
+set -euo pipefail
 
-DEVICE="$1"
+DEVICE="${1:-}"
 
-TRUST_DIR="$HOME/.config/pc-cartridge-system"
-TRUST_FILE="$TRUST_DIR/trusted_scripts.sha256"
-CONFIG_FILE="$TRUST_DIR/settings.conf"
+if [ -z "$DEVICE" ]; then
+    echo "usage: $0 <kernel device name, e.g. sdb1>" >&2
+    exit 2
+fi
 
-mkdir -p "$TRUST_DIR"
-LOG_FILE="$TRUST_DIR/helper_script.log"
-# Log all stdout and stderr to file while keeping terminal output
-exec > >(tee "$LOG_FILE") 2>&1
-echo "==== Cartridge helper started: $(date) ===="
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/pc-cartridge-system"
+mkdir -p "$STATE_DIR"
+LOG_FILE="$STATE_DIR/helper.log"
 
-echo "Game cartridge detected: $DEVICE"
+# Keep one short log rather than growing forever.
+exec >>"$LOG_FILE" 2>&1
+if [ "$(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0)" -gt 262144 ]; then
+    : >"$LOG_FILE"
+fi
 
+echo "==== $(date -Is) cartridge detected: $DEVICE ===="
 
-# Wait for desktop automounter
+# Wait for the desktop automounter. udev fires as soon as the kernel sees the
+# partition, which is earlier than the mount we actually need.
 MOUNT_POINT=""
-
-for i in {1..60}; do
-
-    MOUNT_POINT=$(findmnt -n -o TARGET "/dev/$DEVICE" 2>/dev/null || true)
-
-    if [ -n "$MOUNT_POINT" ]; then
-        break
-    fi
-
+for _ in $(seq 1 60); do
+    MOUNT_POINT=$(findmnt -n -f -o TARGET "/dev/$DEVICE" 2>/dev/null || true)
+    [ -n "$MOUNT_POINT" ] && break
     sleep 0.5
-
 done
-
 
 if [ -z "$MOUNT_POINT" ]; then
-    echo "No mount point found for /dev/$DEVICE"
+    echo "no mount point appeared for /dev/$DEVICE after 30s; giving up"
     exit 0
 fi
 
+echo "mounted at: $MOUNT_POINT"
 
-echo "Mounted at: $MOUNT_POINT"
-
-
-SCRIPT="$MOUNT_POINT/launch.sh"
-
-
-if [ ! -f "$SCRIPT" ]; then
-    echo "No launch.sh found on cartridge"
+# Only cartridges get a launcher. Without this every USB stick would pop a
+# window.
+if [ ! -f "$MOUNT_POINT/cartridge.conf" ] && [ ! -f "$MOUNT_POINT/autorun.inf" ]; then
+    echo "no cartridge.conf or autorun.inf at the root; not a cartridge"
     exit 0
 fi
 
-# Check auto-launch mode
-if [ -f "$CONFIG_FILE" ]; then
+LAUNCHER="${PC_CARTRIDGE_LAUNCHER:-/usr/local/bin/pc-cartridge-launcher}"
 
-    MODE=$(grep "^MODE=" "$CONFIG_FILE" | cut -d '=' -f2)
-
-    if [ "$MODE" != "running" ]; then
-
-        echo "Cartridge execution is disabled."
-        echo "Current mode: $MODE"
-        echo "Skipping launch."
-
-        exit 0
-
-    fi
-
-else
-
-    echo "No settings file found."
-    echo "Defaulting to blocked mode."
-
-    exit 0
-
-fi
-
-
-echo "Found launch.sh"
-
-
-# Check trusted scripts database exists
-if [ ! -f "$TRUST_FILE" ]; then
-    echo "No trusted scripts database found."
-    echo "Cartridge blocked."
+if [ ! -x "$LAUNCHER" ]; then
+    echo "launcher not found at $LAUNCHER"
+    echo "build it with: cd tauri-ui && npm run build, then install the binary there"
     exit 0
 fi
 
+echo "opening launcher for $MOUNT_POINT"
 
-# Calculate hash
-SCRIPT_HASH=$(sha256sum "$SCRIPT" | awk '{print $1}')
-
-echo "Script SHA256:"
-echo "$SCRIPT_HASH"
-
-
-# Check trust database
-if grep -qx "$SCRIPT_HASH" "$TRUST_FILE"; then
-
-    echo "Script is trusted."
-    echo "Launching cartridge..."
-
-    chmod +x "$SCRIPT"
-    bash "$SCRIPT"
-
-# After the launch script exits, safely unmount and power off the drive
-echo "Launch script finished. Ejecting cartridge /dev/$DEVICE ..."
-
-# Unmount all partitions belonging to the parent device
-PARENT_DEVICE=$(lsblk -no PKNAME "/dev/$DEVICE" 2>/dev/null || echo "$DEVICE")
-
-for PART in $(lsblk -ln -o NAME "/dev/$PARENT_DEVICE" 2>/dev/null | tail -n +2); do
-    PART_MOUNT=$(findmnt -n -o TARGET "/dev/$PART" 2>/dev/null || true)
-    if [ -n "$PART_MOUNT" ]; then
-        echo "Unmounting /dev/$PART ..."
-        udisksctl unmount -b "/dev/$PART" --no-user-interaction 2>/dev/null || true
-    fi
-done
-
-# Power off the parent drive so it can be safely removed
-udisksctl power-off -b "/dev/$PARENT_DEVICE" --no-user-interaction 2>/dev/null || true
-
-echo "Cartridge ejected safely."
-
-else
-
-echo "Script is NOT trusted."
-echo "Cartridge blocked."
-
+# The launcher needs the user's session to put a window on screen. The systemd
+# unit already runs as the desktop user; point it at their display.
+export DISPLAY="${DISPLAY:-:0}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -S "$XDG_RUNTIME_DIR/wayland-0" ]; then
+    export WAYLAND_DISPLAY=wayland-0
 fi
+
+exec "$LAUNCHER" --drive "$MOUNT_POINT"

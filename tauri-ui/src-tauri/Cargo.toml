@@ -2,14 +2,18 @@
 name = "pc-cartridge-launcher"
 version = "0.1.0"
 edition = "2021"
+description = "Popup launcher for the PC Cartridge System"
+license = "MIT"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
+cartridge-core = { path = "../../core" }
+# No "protocol-asset": the cover is handed to the webview as a data URI, so the
+# asset protocol stays switched off (see tauri.conf.json).
+tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = [
@@ -18,3 +22,11 @@ windows-sys = { version = "0.52", features = [
     "Win32_System_IO",
     "Win32_System_Ioctl",
 ] }
+
+# The launcher is started on insert and exits when it is dismissed, so start-up
+# time and binary size matter more than peak throughput.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

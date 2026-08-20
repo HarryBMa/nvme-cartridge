@@ -3,36 +3,33 @@
   "version": "0.1.0",
   "identifier": "com.pc-cartridge.launcher",
   "build": {
-    "frontendDist": "../dist",
-    "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "",
-    "beforeBuildCommand": ""
+    "frontendDist": ".."
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [
-      {
-        "title": "PC Cartridge",
-        "width": 420,
-        "height": 560,
-        "resizable": false,
-        "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "center": true,
-        "visible": false
-      }
-    ],
+    "_comment": "No windows are declared here on purpose. main() looks at the arguments and builds exactly one — the popup or the wizard — so neither mode allocates a webview the user is not looking at.",
+    "windows": [],
     "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'",
       "assetProtocol": {
-        "enable": true,
-        "scope": ["**"]
+        "enable": false
       }
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
-    "icon": []
+    "targets": [
+      "deb",
+      "appimage",
+      "nsis",
+      "msi"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ]
   }
 }

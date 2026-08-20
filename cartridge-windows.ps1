@@ -1,58 +1,12 @@
-﻿$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+# Installer menu.
+#
+# There is no trust list and no auto-launch toggle any more: inserting a
+# cartridge opens the launcher, and nothing runs until Play is pressed, so there
+# is nothing to allowlist or switch off.
 
-
-# Config
-$ConfigDir = Join-Path $env:LOCALAPPDATA "PC-Cartridge-System"
-$ConfigFile = Join-Path $ConfigDir "settings.conf"
-
-
-if (-not (Test-Path $ConfigDir)) {
-    New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
-}
-
-
-if (-not (Test-Path $ConfigFile)) {
-    "MODE=running" | Out-File $ConfigFile -Encoding UTF8
-}
-
-
-
-function Get-Mode {
-
-    $ModeLine = Get-Content $ConfigFile | Where-Object { $_ -like "MODE=*" }
-
-    if ($ModeLine) {
-        $Mode = $ModeLine.Split("=")[1]
-        if ($Mode -eq "stopped") {
-            return "stopped"
-        }
-    }
-    return "running"
-}
-
-
-
-function Toggle-Mode {
-    $CurrentMode = Get-Mode
-    if ($CurrentMode -eq "running") {
-        "MODE=stopped" | Out-File $ConfigFile -Encoding UTF8
-    }
-    else {
-        "MODE=running" | Out-File $ConfigFile -Encoding UTF8
-    }
-}
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 function Show-Menu {
-    $Mode = Get-Mode
-    if ($Mode -eq "running") {
-        $ModeText = "Yes"
-        $ModeColor = "Green"
-    }
-    else {
-        $ModeText = "No "
-        $ModeColor = "Red"
-    }
-
     Clear-Host
 
     Write-Host ""
@@ -65,28 +19,16 @@ function Show-Menu {
     ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝╚═╝╚═════╝  ╚═════╝ ╚══════╝╚══════╝
 "@ -ForegroundColor Cyan
 
-
     Write-Host ""
-    Write-Host "        ╭─────────────────────────────────────────╮"
-    Write-Host "        │      Menu                               │"
-    Write-Host "        ├─────────────────────────────────────────┤"
-    Write-Host "        │   1) Install                            │"
-    Write-Host "        │   2) Trust Scripts / Check trust state  │"
-
-    Write-Host -NoNewline "        │   3) Auto-Launch scripts: "
-
-    Write-Host -NoNewline $ModeText -ForegroundColor $ModeColor
-
-    Write-Host "           │"
-
-    Write-Host "        │   4) Eject cartridge                    │"
-    Write-Host "        │   5) Uninstall                          │"
-    Write-Host "        │   6) Exit                               │"
-    Write-Host "        ╰─────────────────────────────────────────╯"
+    Write-Host "        ╭────────────────────────────────╮"
+    Write-Host "        │   1) Install                   │"
+    Write-Host "        │   2) Create a cartridge        │"
+    Write-Host "        │   3) Eject cartridge           │"
+    Write-Host "        │   4) Uninstall                 │"
+    Write-Host "        │   5) Exit                      │"
+    Write-Host "        ╰────────────────────────────────╯"
     Write-Host ""
-
 }
-
 
 while ($true) {
     Show-Menu
@@ -105,23 +47,37 @@ while ($true) {
 
         "2" {
             Clear-Host
-            Write-Host "Starting trust process..."
-            & "$ScriptDir\windows\trust-script.ps1"
-            Clear-Host
+
+            # Prefer a local build so the wizard works before installing.
+            $Built = Join-Path $ScriptDir "tauri-ui\src-tauri\target\release\pc-cartridge-launcher.exe"
+            $Installed = Join-Path $env:LOCALAPPDATA "PC-Cartridge-System\pc-cartridge-launcher.exe"
+
+            $Launcher = if (Test-Path $Built) { $Built } elseif (Test-Path $Installed) { $Installed } else { $null }
+
+            if ($null -eq $Launcher) {
+                Write-Host "The launcher has not been built yet:" -ForegroundColor Yellow
+                Write-Host ""
+                Write-Host "  cd tauri-ui"
+                Write-Host "  npm install"
+                Write-Host "  npm run build"
+                Write-Host ""
+                PAUSE
+            }
+            else {
+                Write-Host "Opening the cartridge wizard..."
+                Start-Process -FilePath $Launcher -ArgumentList "--create" -Wait
+                Clear-Host
+            }
         }
 
         "3" {
-            Toggle-Mode
-        }
-
-        "4" {
             Clear-Host
             Write-Host "Eject cartridge..."
             & "$ScriptDir\windows\eject.ps1"
             Clear-Host
         }
 
-        "5" {
+        "4" {
             Clear-Host
             Write-Host "Starting uninstall..."
             Start-Process `
@@ -131,7 +87,7 @@ while ($true) {
                 -Wait
         }
 
-        "6" {
+        "5" {
             Clear-Host
             exit
         }

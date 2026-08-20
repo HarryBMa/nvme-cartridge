@@ -1,177 +1,45 @@
 // PC Cartridge Launcher — Tauri 2.0 backend
 //
-// Exposes four commands to the frontend:
-//   parse_cartridge(drive_path)              -> CartridgeInfo
-//   read_image_as_data_uri(path)             -> String (base64 data URI)
+// One binary, two modes, chosen by the arguments it was started with:
+//
+//   pc-cartridge-launcher --drive <path>    the popup, opened on insert
+//   pc-cartridge-launcher --create          the create-cartridge wizard
+//
+// Exactly one window is built, so the wizard costs nothing when a cartridge is
+// inserted and the popup costs nothing while making one.
+//
+// Launcher commands:
+//   drive_path()                             -> String
+//   parse_cartridge(drive_path)              -> CartridgeInfo (cover included)
 //   launch_game(executable, drive_path)      -> ()
 //   eject_drive(drive_path)                  -> ()
+//
+// Wizard commands:
+//   list_games()                             -> Vec<GameInfo>  (Playnite + Steam)
+//   game_cover(library, id)                  -> String (data URI)
+//   list_target_drives()                     -> Vec<TargetDrive>
+//   format_plan(drive_path)                  -> FormatPlan
+//   executable_choices(playnite_id)          -> Vec<Candidate>
+//   steam_registration(drive_path)           -> bool
+//   unregister_from_steam(drive_path)        -> bool
+//   create_cartridge(request)                -> CartridgeResult,
+//                                               emitting cartridge://progress
+//
+// There is deliberately no command that takes a path to read. An earlier
+// read_image_as_data_uri(path) let the webview turn any file on the system into
+// a data URI; the cover is now read here, from a path this file derives and
+// confines to the cartridge itself.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use serde::Serialize;
-use std::collections::HashMap;
+// All of the real work lives in cartridge-core, which has no UI dependency and
+// so can be tested without a webview. This file is the Tauri shell around it.
+use cartridge_core::cartridge::{self, CartridgeInfo};
+use cartridge_core::{create, drives, format};
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
-// --------------------------------------------------------------------------
-// Data types
-// --------------------------------------------------------------------------
-
-#[derive(Serialize, Clone)]
-pub struct CartridgeInfo {
-    /// Display title of the game / cartridge.
-    title: String,
-    /// Absolute path to the cover image, or empty string if none.
-    cover_path: String,
-    /// The value from the `executable` / `open` key — either a URI or a
-    /// relative path on the cartridge.
-    executable: String,
-    /// The root path of the cartridge drive as supplied by the caller.
-    drive_path: String,
-}
-
-// --------------------------------------------------------------------------
-// Inline INI / conf file parser
-//
-// Handles both Windows autorun.inf ([section] key=value) and our flat
-// cartridge.conf (key=value, no sections required).
-// --------------------------------------------------------------------------
-
-type IniMap = HashMap<String, HashMap<String, String>>;
-
-fn parse_ini(content: &str) -> IniMap {
-    let mut map: IniMap = HashMap::new();
-    let mut current_section = String::from("general");
-
-    for raw_line in content.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
-            continue;
-        }
-        if line.starts_with('[') {
-            if let Some(end) = line.find(']') {
-                current_section = line[1..end].trim().to_lowercase();
-            }
-            continue;
-        }
-        if let Some(eq) = line.find('=') {
-            let key = line[..eq].trim().to_lowercase();
-            let val = line[eq + 1..].trim().to_string();
-            map.entry(current_section.clone())
-                .or_default()
-                .insert(key, val);
-        }
-    }
-    map
-}
-
-fn ini_get<'a>(map: &'a IniMap, section: &str, key: &str) -> Option<&'a String> {
-    map.get(section)?.get(key)
-}
-
-// --------------------------------------------------------------------------
-// Helper: read cartridge metadata
-//
-// Priority:
-//   1. cartridge.conf  (our own flat format, section "general" or none)
-//   2. autorun.inf     (classic Windows autorun, section [autorun])
-// --------------------------------------------------------------------------
-
-fn read_cartridge_info(drive_path: &str) -> Result<CartridgeInfo, String> {
-    let root = Path::new(drive_path);
-
-    // ---- Try cartridge.conf first ----
-    let conf_path = root.join("cartridge.conf");
-    if conf_path.exists() {
-        let content = std::fs::read_to_string(&conf_path)
-            .map_err(|e| format!("Failed to read cartridge.conf: {e}"))?;
-
-        let ini = parse_ini(&content);
-
-        // cartridge.conf may have no section header — values land in "general"
-        let executable = ini_get(&ini, "general", "executable")
-            .cloned()
-            .unwrap_or_default();
-
-        let title = ini_get(&ini, "general", "title")
-            .cloned()
-            .unwrap_or_else(|| "Unknown Game".to_string());
-
-        let cover_rel = ini_get(&ini, "general", "cover").cloned().unwrap_or_default();
-        let cover_path = resolve_cover(root, &cover_rel);
-
-        return Ok(CartridgeInfo {
-            title,
-            cover_path,
-            executable,
-            drive_path: drive_path.to_string(),
-        });
-    }
-
-    // ---- Fall back to autorun.inf ----
-    let autorun_path = root.join("autorun.inf");
-    if autorun_path.exists() {
-        let content = std::fs::read_to_string(&autorun_path)
-            .map_err(|e| format!("Failed to read autorun.inf: {e}"))?;
-
-        let ini = parse_ini(&content);
-
-        let executable = ini_get(&ini, "autorun", "open")
-            .or_else(|| ini_get(&ini, "autorun", "shellexecute"))
-            .cloned()
-            .unwrap_or_default();
-
-        let title = ini_get(&ini, "autorun", "label")
-            .cloned()
-            .unwrap_or_else(|| "Unknown Game".to_string());
-
-        let icon_rel = ini_get(&ini, "autorun", "icon").cloned().unwrap_or_default();
-        let cover_path = resolve_cover(root, &icon_rel);
-
-        return Ok(CartridgeInfo {
-            title,
-            cover_path,
-            executable,
-            drive_path: drive_path.to_string(),
-        });
-    }
-
-    Err(format!(
-        "No cartridge.conf or autorun.inf found in {drive_path}"
-    ))
-}
-
-/// Resolve a relative cover image path, falling back to common filenames.
-fn resolve_cover(root: &Path, rel: &str) -> String {
-    if !rel.is_empty() {
-        let p = root.join(rel);
-        if p.exists() {
-            return p.to_string_lossy().to_string();
-        }
-    }
-    find_cover_image(root)
-}
-
-/// Look for common cover image filenames in the root of the cartridge.
-fn find_cover_image(root: &Path) -> String {
-    let candidates = [
-        "cover.png",
-        "cover.jpg",
-        "cover.jpeg",
-        "cover.webp",
-        "poster.png",
-        "poster.jpg",
-        "box.png",
-        "box.jpg",
-    ];
-    for name in &candidates {
-        let p = root.join(name);
-        if p.exists() {
-            return p.to_string_lossy().to_string();
-        }
-    }
-    String::new()
-}
+use tauri::{Emitter, WebviewUrl, WebviewWindowBuilder};
 
 // --------------------------------------------------------------------------
 // Tauri commands
@@ -180,63 +48,17 @@ fn find_cover_image(root: &Path) -> String {
 /// Parse the cartridge at `drive_path` and return metadata.
 #[tauri::command]
 fn parse_cartridge(drive_path: String) -> Result<CartridgeInfo, String> {
-    read_cartridge_info(&drive_path)
+    cartridge::read_cartridge_info(&drive_path)
 }
 
-/// Read an image file and return it as a base64 data URI.
+/// The cartridge this window was started for.
+///
+/// The frontend asks for this rather than reading a query string: the window is
+/// declared in tauri.conf.json and loads `index.html` with no parameters, so
+/// there is nothing in the URL to read.
 #[tauri::command]
-fn read_image_as_data_uri(path: String) -> Result<String, String> {
-    use std::io::Read;
-
-    if path.is_empty() {
-        return Ok(String::new());
-    }
-
-    let mut file =
-        std::fs::File::open(&path).map_err(|e| format!("Cannot open image {path}: {e}"))?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|e| format!("Cannot read image {path}: {e}"))?;
-
-    let ext = PathBuf::from(&path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-
-    let mime = match ext.as_str() {
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        _ => "image/png",
-    };
-
-    let b64 = base64_encode(&bytes);
-    Ok(format!("data:{mime};base64,{b64}"))
-}
-
-/// Minimal base64 encoder — avoids adding a `base64` crate dependency.
-fn base64_encode(input: &[u8]) -> String {
-    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
-    for chunk in input.chunks(3) {
-        let b0 = chunk[0] as usize;
-        let b1 = if chunk.len() > 1 { chunk[1] as usize } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as usize } else { 0 };
-        out.push(CHARS[(b0 >> 2) & 0x3F] as char);
-        out.push(CHARS[((b0 << 4) | (b1 >> 4)) & 0x3F] as char);
-        out.push(if chunk.len() > 1 {
-            CHARS[((b1 << 2) | (b2 >> 6)) & 0x3F] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            CHARS[b2 & 0x3F] as char
-        } else {
-            '='
-        });
-    }
-    out
+fn drive_path() -> String {
+    cartridge::drive_from_args(std::env::args().skip(1))
 }
 
 /// Launch the game.
@@ -470,17 +292,121 @@ fn get_parent_device(partition: &str) -> String {
 }
 
 // --------------------------------------------------------------------------
+// Wizard commands
+// --------------------------------------------------------------------------
+
+/// Everything installed, from Playnite where available and Steam otherwise.
+#[tauri::command]
+fn list_games() -> Result<Vec<create::GameInfo>, String> {
+    create::list_games()
+}
+
+#[tauri::command]
+fn game_cover(library: create::Library, id: String) -> String {
+    create::game_cover(library, &id)
+}
+
+#[tauri::command]
+fn list_target_drives() -> Vec<drives::TargetDrive> {
+    create::target_drives()
+}
+
+/// What formatting a drive would destroy, for the confirmation step.
+#[tauri::command]
+fn format_plan(drive_path: String) -> Result<format::FormatPlan, String> {
+    create::format_plan(&drive_path)
+}
+
+/// What Play could start, for a game whose folder is about to be copied.
+///
+/// Ranked best-first; the window offers the top one and lets the user change it.
+#[tauri::command]
+fn executable_choices(
+    playnite_id: String,
+) -> Result<Vec<cartridge_core::portable::Candidate>, String> {
+    create::executable_choices(&playnite_id)
+}
+
+/// Whether the drive is currently a registered Steam library folder.
+#[tauri::command]
+fn steam_registration(drive_path: String) -> bool {
+    create::steam_registration(&drive_path)
+}
+
+/// Remove the cartridge from Steam's library list.
+#[tauri::command]
+fn unregister_from_steam(drive_path: String) -> Result<bool, String> {
+    create::unregister_from_steam(&drive_path)
+}
+
+/// Build the cartridge, streaming progress to the window.
+///
+/// Copying a game is minutes of work, so it runs on a blocking thread and emits
+/// `cartridge://progress` instead of leaving the window frozen.
+#[tauri::command]
+async fn create_cartridge(
+    window: tauri::WebviewWindow,
+    request: create::CartridgeRequest,
+) -> Result<create::CartridgeResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        create::create_cartridge(&request, &mut |progress| {
+            let _ = window.emit("cartridge://progress", progress);
+        })
+    })
+    .await
+    .map_err(|e| format!("the build thread failed: {e}"))?
+}
+
+// --------------------------------------------------------------------------
 // Entry point
 // --------------------------------------------------------------------------
 
 fn main() {
+    // Both windows start hidden; the frontend shows itself once it has drawn,
+    // so the user never sees an empty frame.
+    let wizard = std::env::args().skip(1).any(|arg| arg == "--create");
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            drive_path,
             parse_cartridge,
-            read_image_as_data_uri,
             launch_game,
             eject_drive,
+            list_games,
+            game_cover,
+            list_target_drives,
+            format_plan,
+            executable_choices,
+            steam_registration,
+            unregister_from_steam,
+            create_cartridge,
         ])
+        .setup(move |app| {
+            if wizard {
+                WebviewWindowBuilder::new(app, "create", WebviewUrl::App("create.html".into()))
+                    .title("Create cartridge")
+                    .inner_size(880.0, 660.0)
+                    .resizable(false)
+                    .decorations(false)
+                    .transparent(true)
+                    .center()
+                    .visible(false)
+                    .build()?;
+            } else {
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                    .title("PC Cartridge")
+                    .inner_size(420.0, 560.0)
+                    .resizable(false)
+                    .decorations(false)
+                    .transparent(true)
+                    // The popup has to land on top of whatever is running.
+                    .always_on_top(true)
+                    .center()
+                    .visible(false)
+                    .build()?;
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");
 }

@@ -1,8 +1,11 @@
 {
   "$schema": "https://schemas.tauri.app/config/v2/capability.json",
   "identifier": "default",
-  "description": "Default capability for PC Cartridge Launcher",
-  "windows": ["main"],
+  "description": "Both windows talk only to this app's own commands and manage their own visibility. The webview gets no filesystem, shell or HTTP permission; all disk and process work happens in Rust.",
+  "windows": [
+    "main",
+    "create"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
