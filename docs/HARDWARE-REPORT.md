@@ -351,6 +351,68 @@ Filtered in the same commit, by id for the redistributables and the Linux
 runtimes, and by name for Proton and Steam Linux Runtime, which take a new app
 id per release. The list is now 42 games, all of them games.
 
+### Gap: 44 installed games on this host cannot go on a cartridge at all
+
+Asked about `B:\Games`, which holds installed games the same way the folders
+under `F:\Games` do. Neither is visible to the wizard, and neither can be
+copied.
+
+| Location | Games |
+|---|---|
+| `B:\Games` | 12 |
+| `F:\Games\Epic` | 10 |
+| `F:\Games\Origin` | 3 |
+| `F:\Games\Blizzard` | 2 |
+| `F:\Games\Ubisoft` | 1 |
+| `F:\Games\Other\Cracked Games` | 16 |
+| **Total** | **44** |
+
+For comparison the wizard currently offers 42, all of them Steam. So roughly
+half this machine's library is unreachable.
+
+The cause is one early return in `portable_source` (`core/src/create.rs:1053`):
+
+```rust
+let Some(playnite_id) = request.playnite_id.as_deref() else {
+    return Ok(None);
+};
+```
+
+A folder is copyable only if Playnite told the wizard where it is. Everything
+else needed is already built and already generic:
+
+- `portable::find_executables(dir, title, play_action)` ranks the candidate
+  executables in **any** directory, with scoring that already demotes
+  `launcher`, `server`, `editor` and `benchmark`.
+- `copy_portable_game` copies **any** source directory to `Games/<name>` on the
+  cartridge, sums it for verification, checks free space, and rewrites the Play
+  target to a path inside the cartridge.
+
+Only the source is missing. The UI does not hide this: in manual mode the Copy
+checkbox is disabled and the hint reads *"Only available for a game picked from
+the list."* So a manual entry produces a cartridge that points at
+`B:\Games\...`, which works on this PC only — the opposite of what a cartridge
+is for.
+
+Two ways out, neither taken yet:
+
+1. **Install a Playnite JSON exporter.** Playnite already has the Epic, Origin,
+   Ubisoft and Battle.net library integrations installed, so an export would
+   reach 16 of the 44 with install directories attached, and they would become
+   copyable with no code change. The 12 in `B:\Games` and the 16 under `Other`
+   would each have to be added to Playnite by hand first.
+2. **Let the wizard take a folder.** Add a source directory to
+   `CartridgeRequest`, return it from `portable_source`, and put a folder picker
+   beside the manual entry — `tauri-plugin-dialog` is already a dependency and
+   already used by `pick_cover_image`. The executable picker that exists for
+   Playnite games (`executable_choices`) would then work for these too, since it
+   is only `find_executables` behind a command that currently takes a Playnite
+   id.
+
+(2) is the smaller change of the two in the long run and removes the extension
+dependency for self-contained games entirely. Raised as Open question 7 rather
+than built, per the brief: it is a feature, not a correction.
+
 ### Bug: there is no health readout in the wizard
 
 `cartridge_health` is registered as a command and implemented, but it is invoked
