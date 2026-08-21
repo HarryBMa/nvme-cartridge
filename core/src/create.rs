@@ -65,6 +65,21 @@ pub struct GameInfo {
     pub can_copy: bool,
 }
 
+/// The installed games, and why any library is missing from them.
+///
+/// The two are returned together because a partial list is still worth showing.
+/// Steam almost always answers, so returning an error the moment Playnite fails
+/// would throw away a usable list — but reporting only the games silently drops
+/// the reason the other library is absent, which reads as "Playnite is not
+/// supported" rather than "Playnite needs an exporter extension".
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameList {
+    pub games: Vec<GameInfo>,
+    /// One line per library that could not be read. Empty on a clean run.
+    pub problems: Vec<String>,
+}
+
 /// One game's metadata when creating a multi-game bundle cartridge.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -214,7 +229,7 @@ pub struct CartridgeResult {
 /// auto-discovery did not find Playnite. Corresponds to the `PLAYNITE_ROOT`
 /// environment variable, but can be set per-invocation without touching the
 /// environment.
-pub fn list_games(playnite_root_override: Option<&str>) -> Result<Vec<GameInfo>, String> {
+pub fn list_games(playnite_root_override: Option<&str>) -> Result<GameList, String> {
     let mut out = Vec::new();
     let mut problems = Vec::new();
 
@@ -248,7 +263,10 @@ pub fn list_games(playnite_root_override: Option<&str>) -> Result<Vec<GameInfo>,
     }
 
     out.sort_by_key(|a| a.name.to_lowercase());
-    Ok(out)
+    Ok(GameList {
+        games: out,
+        problems,
+    })
 }
 
 fn playnite_games(playnite_root_override: Option<&str>) -> Result<Vec<GameInfo>, String> {
@@ -256,28 +274,14 @@ fn playnite_games(playnite_root_override: Option<&str>) -> Result<Vec<GameInfo>,
         .map(PathBuf::from)
         .or_else(playnite::playnite_root)
         .ok_or_else(|| "Playnite not found.".to_string())?;
-    let exports = playnite::find_exports(&root);
-    if exports.is_empty() {
-        return Err(format!(
+    let (_, games) = playnite::import_newest_in(&root).map_err(|e| match e {
+        playnite::ImportError::NotFound => format!(
             "Playnite is installed at {} but has no JSON library export. \
              Install a JSON library exporter extension and run it.",
             root.display()
-        ));
-    }
-
-    // Newest export wins, since several extensions may have written one.
-    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
-    for path in exports {
-        let modified = std::fs::metadata(&path)
-            .and_then(|m| m.modified())
-            .unwrap_or(std::time::UNIX_EPOCH);
-        if newest.as_ref().map(|(t, _)| modified > *t).unwrap_or(true) {
-            newest = Some((modified, path));
-        }
-    }
-    let (_, path) = newest.expect("exports was not empty");
-
-    let games = playnite::import_from(&path).map_err(|e| e.to_string())?;
+        ),
+        other => other.to_string(),
+    })?;
 
     Ok(games
         .into_iter()

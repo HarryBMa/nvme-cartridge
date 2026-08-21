@@ -396,9 +396,19 @@ pub fn find_exports(root: &Path) -> Vec<PathBuf> {
             if let Ok(files) = std::fs::read_dir(entry.path()) {
                 for file in files.flatten() {
                     let path = file.path();
-                    if path.extension().and_then(|e| e.to_str()) == Some("json")
-                        && !found.contains(&path)
-                    {
+                    if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                        continue;
+                    }
+                    // Every extension keeps its settings in `config.json`, so on
+                    // a real Playnite install these outnumber the exports and
+                    // none of them is one. Taking them as candidates is how a
+                    // machine with no exporter installed ends up reporting a
+                    // parse error against an unrelated file instead of saying
+                    // there is no export.
+                    if is_extension_settings(&path) {
+                        continue;
+                    }
+                    if !found.contains(&path) {
                         found.push(path);
                     }
                 }
@@ -407,6 +417,48 @@ pub fn find_exports(root: &Path) -> Vec<PathBuf> {
     }
 
     found
+}
+
+/// A file that is an extension's own settings rather than a library export.
+fn is_extension_settings(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.eq_ignore_ascii_case("config.json"))
+}
+
+/// Import from whichever candidate under `root` actually parses, newest first.
+///
+/// An extension data folder holds whatever that extension felt like writing —
+/// tag lists, caches, settings under some other name — so the newest JSON is
+/// not necessarily an export. Trying them in turn means one piece of unrelated
+/// JSON cannot hide a library that is sitting right beside it.
+///
+/// The error, when every candidate fails, is `NotFound`: from the caller's
+/// point of view there was no export here, which is both true and the thing
+/// worth telling the user.
+pub fn import_newest_in(root: &Path) -> Result<(PathBuf, Vec<PlayniteGame>), ImportError> {
+    let mut candidates = find_exports(root);
+    if candidates.is_empty() {
+        return Err(ImportError::NotFound);
+    }
+
+    // Newest first: several extensions may have written one, and the most
+    // recently refreshed export is the one that matches the library.
+    candidates.sort_by_key(|path| {
+        std::cmp::Reverse(
+            std::fs::metadata(path)
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH),
+        )
+    });
+
+    for path in candidates {
+        if let Ok(games) = import_from(&path) {
+            return Ok((path, games));
+        }
+    }
+
+    Err(ImportError::NotFound)
 }
 
 /// Resolve a game's cover to a real file.
@@ -603,5 +655,54 @@ mod tests {
         assert!(found.contains(&ext.join("library.json")));
         // Non-JSON files are not exports.
         assert!(!found.iter().any(|p| p.ends_with("settings.dat")));
+    }
+
+    #[test]
+    fn an_extensions_own_settings_are_not_a_library_export() {
+        // Every installed extension writes a config.json, so on a real Playnite
+        // install these outnumber the exports and none of them is one. Counting
+        // them meant a machine with no exporter reported a parse failure against
+        // an unrelated file instead of saying there was no export.
+        let scratch = crate::testutil::Scratch::new("playnite-conf");
+        let ext = scratch.join("ExtensionsData/cb91dfc9-b977-43bf-8e70-55f46e410fab");
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(ext.join("config.json"), br#"{"Enabled":true}"#).unwrap();
+
+        assert!(find_exports(scratch.path()).is_empty());
+        assert!(matches!(
+            import_newest_in(scratch.path()),
+            Err(ImportError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn unrelated_json_beside_an_export_does_not_hide_it() {
+        // An extension data folder holds whatever that extension felt like
+        // writing. The newest file there is not necessarily the export, and
+        // when it is not, the export must still be found.
+        let scratch = crate::testutil::Scratch::new("playnite-junk");
+        let ext = scratch.join("ExtensionsData/cb91dfc9-b977-43bf-8e70-55f46e410fab");
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(
+            ext.join("library.json"),
+            br#"[{"Id":"1","Name":"Tunic","IsInstalled":true}]"#,
+        )
+        .unwrap();
+        // Written second, so it is the newer of the two.
+        std::fs::write(ext.join("tagnames-swedish.json"), br#"{"rollspel":"RPG"}"#).unwrap();
+
+        let (path, games) = import_newest_in(scratch.path()).expect("the real export");
+        assert_eq!(path, ext.join("library.json"));
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].name, "Tunic");
+    }
+
+    #[test]
+    fn no_playnite_data_at_all_is_simply_not_found() {
+        let scratch = crate::testutil::Scratch::new("playnite-bare");
+        assert!(matches!(
+            import_newest_in(scratch.path()),
+            Err(ImportError::NotFound)
+        ));
     }
 }

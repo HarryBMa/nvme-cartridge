@@ -18,7 +18,7 @@
 //   update_cartridge(request)                -> UpdateResult
 //
 // Wizard commands:
-//   list_games()                             -> Vec<GameInfo>  (Playnite + Steam)
+//   list_games()                             -> GameList { games, problems } (Playnite + Steam)
 //   get_settings()                           -> Settings
 //   set_settings(settings)                   -> Settings
 //   suggest_collection_name(titles)          -> String
@@ -327,7 +327,7 @@ fn get_parent_device(partition: &str) -> String {
 /// `playnite_root` lets the wizard pass a user-supplied Playnite data directory
 /// when auto-discovery failed. If absent, the usual lookup is used.
 #[tauri::command]
-fn list_games(playnite_root: Option<String>) -> Result<Vec<create::GameInfo>, String> {
+fn list_games(playnite_root: Option<String>) -> Result<create::GameList, String> {
     create::list_games(playnite_root.as_deref())
 }
 

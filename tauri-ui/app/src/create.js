@@ -2,8 +2,10 @@
  * Create-cartridge wizard.
  *
  * Backend contract (src-tauri/src/create.rs):
- *   list_games()                     -> [{ id, name, library, source, sizeOnDisk,
- *                                          hasCover, executable, canCopy }]
+ *   list_games()                     -> { games: [{ id, name, library, source,
+ *                                          sizeOnDisk, hasCover, executable,
+ *                                          canCopy }],
+ *                                          problems: ["why a library is absent"] }
  *   game_cover({ library, id })      -> "data:image/…" | ""
  *   get_settings()                    -> { steamgriddbEnabled, steamgriddbApiKey }
  *   set_settings({ settings })        -> the settings as stored
@@ -1288,11 +1290,20 @@ async function showTuningCommands() {
 
 async function loadGames(playniteRoot = null) {
   try {
-    games = await invoke("list_games", playniteRoot ? { playniteRoot } : {});
+    const result = await invoke("list_games", playniteRoot ? { playniteRoot } : {});
+    games = result.games ?? [];
+    const problems = result.problems ?? [];
     renderGames();
-    // If we loaded successfully with a custom path, keep the panel visible so
-    // the user can change it, but dim the hint since it worked.
-    if (playniteRoot) {
+
+    // A library that could not be read is worth saying out loud even when the
+    // list is not empty. Steam almost always answers, so without this the
+    // wizard silently shows Steam alone and looks like it supports nothing
+    // else.
+    if (problems.length) {
+      status(problems.join(" "), "error");
+      el.playniteLocate.hidden = false;
+    } else if (playniteRoot) {
+      // Loaded with a custom path: keep the panel up so it can be changed.
       el.playniteLocate.hidden = false;
     } else {
       el.playniteLocate.hidden = true;
@@ -1491,7 +1502,7 @@ async function start() {
 async function demoInvoke(command, args) {
   switch (command) {
     case "list_games":
-      return [
+      return { problems: [], games: [
         { id: "367520", name: "Hollow Knight", library: "steam", source: "Steam",
           sizeOnDisk: 9_106_886_656, hasCover: true,
           executable: "steam://rungameid/367520", canCopy: true },
@@ -1513,7 +1524,7 @@ async function demoInvoke(command, args) {
         { id: "413150", name: "Stardew Valley", library: "steam", source: "Steam",
           sizeOnDisk: 1_006_632_960, hasCover: false,
           executable: "steam://rungameid/413150", canCopy: true },
-      ];
+      ] };
     case "get_settings":
       // The preview mirrors a fresh install: offline until switched on.
       return { steamgriddbEnabled: false, steamgriddbApiKey: "" };
