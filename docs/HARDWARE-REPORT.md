@@ -409,9 +409,28 @@ Two ways out, neither taken yet:
    is only `find_executables` behind a command that currently takes a Playnite
    id.
 
-(2) is the smaller change of the two in the long run and removes the extension
-dependency for self-contained games entirely. Raised as Open question 7 rather
-than built, per the brief: it is a feature, not a correction.
+**Decision: (2), built.** Commit `65236fa`.
+
+- `CartridgeRequest` and `BundleGameRequest` carry a `source_dir`, and
+  `portable_source` prefers it over Playnite.
+- The by-hand entry grows a folder picker. The folder name is offered as the
+  title, the folder size is shown, and the executable picker that already
+  existed for Playnite games now works on any directory.
+- Write no longer demands a launch target when the copy is about to supply one.
+- `check_source_dir` refuses a whole drive (whose copy would take every other
+  game and the recycle bin with it) and anything inside `%SystemRoot%`;
+  `copy_portable_game` separately refuses a source that is already on the
+  cartridge, which would not terminate. Both are checked in core, not in the
+  window, because a command is reachable whatever the interface allowed.
+- `source_dir` is per game in a bundle. `for_game` fills the rest of the request
+  with `..self.clone()`, so an inherited source would have copied one folder once
+  per game under each game's name.
+
+Four tests added; core is 159 passed, 0 failed, clippy clean on core and the
+Tauri backend, release binary and both installers rebuilt.
+
+**Untested on hardware.** Nothing has been copied to D: yet — that is Phase 3,
+which is destructive and waits on confirmation.
 
 ### Bug: there is no health readout in the wizard
 
