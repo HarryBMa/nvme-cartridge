@@ -289,9 +289,11 @@ function safePreviewSrc(src) {
 function setPreviewArt(src, source = "") {
   const safeSrc = safePreviewSrc(src);
   if (safeSrc) {
+    el.previewImg.hidden = false;
     el.previewImg.src = safeSrc;
     el.previewArt.classList.add("has-art");
   } else {
+    el.previewImg.hidden = true;
     el.previewImg.removeAttribute("src");
     el.previewArt.classList.remove("has-art");
   }
@@ -1133,7 +1135,7 @@ function refreshCreateButton() {
 function showProgress(on) {
   el.progress.hidden = !on;
   if (!on) {
-    el.progressFill.style.width = "0";
+    el.progressFill.style.setProperty("--progress-pct", "0");
     el.progressFill.classList.remove("is-indeterminate");
     el.progressText.textContent = "";
   }
@@ -1144,7 +1146,7 @@ function onProgress(p) {
   if (p.totalBytes > 0) {
     el.progressFill.classList.remove("is-indeterminate");
     const pct = Math.min(100, (p.doneBytes / p.totalBytes) * 100);
-    el.progressFill.style.width = `${pct.toFixed(1)}%`;
+    el.progressFill.style.setProperty("--progress-pct", `${(pct / 100).toFixed(3)}`);
     el.progressText.textContent =
       `${p.message} ${formatBytes(p.doneBytes)} of ${formatBytes(p.totalBytes)}`;
   } else {
@@ -1481,6 +1483,10 @@ el.unregister.addEventListener("click", async () => {
 });
 
 el.close.addEventListener("click", closeWindow);
+
+if (tauri?.event) {
+  tauri.event.listen("open-settings", openSettings);
+}
 
 document.addEventListener("keydown", (event) => {
   // Never let Escape discard a half-written cartridge.

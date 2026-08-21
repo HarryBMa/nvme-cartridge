@@ -30,6 +30,7 @@ const el = {
   eyebrow: document.getElementById("eyebrow-text"),
   title: document.getElementById("game-title"),
   notice: document.getElementById("notice"),
+  bundleHint: document.getElementById("bundle-hint"),
   play: document.getElementById("btn-play"),
   eject: document.getElementById("btn-eject"),
   close: document.getElementById("btn-close"),
@@ -90,15 +91,19 @@ function hslToRgb(h, s, l) {
  */
 function setAccent(h, s, l) {
   const root = document.documentElement.style;
-  root.setProperty("--accent", `hsl(${h.toFixed(0)} ${(s * 100).toFixed(0)}% ${(l * 100).toFixed(0)}%)`);
-
   const accentLum = luminance(...hslToRgb(h, s, l));
-  const dark = contrast(accentLum, luminance(...hslToRgb(h, 0.22, 0.11)));
-  const light = contrast(accentLum, luminance(...hslToRgb(h, 0.12, 0.97)));
-  root.setProperty(
-    "--accent-ink",
-    dark >= light ? `hsl(${h.toFixed(0)} 22% 11%)` : `hsl(${h.toFixed(0)} 12% 97%)`,
-  );
+  const darkContrast = contrast(accentLum, luminance(...hslToRgb(h, 0.22, 0.11)));
+  const lightContrast = contrast(accentLum, luminance(...hslToRgb(h, 0.12, 0.97)));
+  const useDark = darkContrast >= lightContrast;
+
+  if (Math.max(darkContrast, lightContrast) < 4.5) {
+    root.setProperty("--accent", "oklch(0.76 0.15 85)");
+    root.setProperty("--accent-ink", "oklch(0.16 0.02 65)");
+    return;
+  }
+
+  root.setProperty("--accent", `hsl(${h.toFixed(0)} ${(s * 100).toFixed(0)}% ${(l * 100).toFixed(0)}%)`);
+  root.setProperty("--accent-ink", useDark ? `hsl(${h.toFixed(0)} 22% 11%)` : `hsl(${h.toFixed(0)} 12% 97%)`);
 }
 
 /**
@@ -332,7 +337,7 @@ function fail(headline, detail) {
   el.eyebrow.textContent = "Cartridge";
   el.card.classList.add("is-blocked");
   el.notice.hidden = false;
-  el.notice.textContent = detail;
+  el.notice.textContent = `${detail} Close this window, reconnect the cartridge, and try again.`;
   el.play.disabled = true;
   el.eject.disabled = !cartridge || !ejectable;
 }
@@ -390,6 +395,7 @@ async function init() {
     el.gameList.hidden = false;
     el.bundleEjectRow.hidden = !ejectable;
     el.bundleEject.disabled = !ejectable;
+    el.bundleHint.hidden = false;
     el.eyebrow.textContent = `Collection · ${cartridge.games.length} games`;
     renderGameList(cartridge.games);
   }
@@ -427,6 +433,11 @@ function renderGameList(games) {
     titleEl.className = "game-row__title";
     titleEl.textContent = game.title || "Unknown game";
 
+    const key = document.createElement("kbd");
+    key.className = "game-row__key";
+    key.textContent = index < 9 ? String(index + 1) : "";
+    key.setAttribute("aria-hidden", "true");
+
     const btn = document.createElement("button");
     btn.className = "game-row__play";
     btn.type = "button";
@@ -450,7 +461,7 @@ function renderGameList(games) {
       }
     });
 
-    li.append(img, titleEl, btn);
+    li.append(img, key, titleEl, btn);
     el.gameList.append(li);
   });
 
@@ -471,6 +482,7 @@ function renderGameList(games) {
 
 function showCover(src) {
   return new Promise((resolve) => {
+    el.cover.hidden = false;
     el.cover.addEventListener(
       "load",
       () => {
@@ -480,7 +492,10 @@ function showCover(src) {
       },
       { once: true },
     );
-    el.cover.addEventListener("error", () => resolve(), { once: true });
+    el.cover.addEventListener("error", () => {
+      el.cover.hidden = true;
+      resolve();
+    }, { once: true });
     el.cover.src = src;
   });
 }
@@ -519,7 +534,9 @@ async function doEject(btnLabel) {
   if (cartridge.holds_game && !ejectConfirmed) {
     ejectConfirmed = true;
     if (btnLabel) btnLabel.textContent = "Eject anyway";
-    toast("The game is installed on this cartridge. Quit it first, then press Eject again.", true);
+    el.notice.hidden = false;
+    el.notice.textContent = "The game is installed on this cartridge. Quit it first, then press Eject anyway.";
+    toast("Eject is waiting for confirmation", true);
     return;
   }
   setBusy(true);

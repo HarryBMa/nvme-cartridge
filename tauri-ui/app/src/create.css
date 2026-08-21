@@ -437,8 +437,8 @@ li:last-child .row {
   gap: 9px;
   margin: 2px 0 0 23px;
   padding: 11px 12px;
-  border-left: 2px solid color-mix(in oklch, var(--danger) 55%, transparent);
-  background: color-mix(in oklch, var(--danger) 7%, transparent);
+  border-left: 1px solid color-mix(in oklch, var(--danger) 45%, transparent);
+  background: color-mix(in oklch, var(--danger) 6%, transparent);
   border-radius: 0 4px 4px 0;
   animation: rise 320ms var(--ease) both;
 }
@@ -475,16 +475,20 @@ li:last-child .row {
 }
 
 #progress-fill {
+  --progress-pct: 0;
   height: 100%;
-  width: 0;
+  width: 100%;
   border-radius: inherit;
   background: var(--accent);
-  transition: width 200ms linear;
+  transform-origin: left center;
+  transform: scaleX(var(--progress-pct));
+  transition: transform 200ms linear;
 }
 
 /* A step with no byte count still needs to look alive. */
 #progress-fill.is-indeterminate {
-  width: 35%;
+  width: 100%;
+  transform-origin: left center;
   animation: sweep 1100ms ease-in-out infinite;
 }
 

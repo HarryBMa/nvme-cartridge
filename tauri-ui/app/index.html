@@ -10,7 +10,7 @@
   <!-- The whole window is the cover art. Everything else sits on top of it. -->
   <main id="card" aria-labelledby="game-title">
 
-    <img id="cover-img" alt="" />
+    <img id="cover-img" alt="" hidden />
     <div id="cover-placeholder" aria-hidden="true">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"
            stroke-linecap="round" stroke-linejoin="round" width="52" height="52">
@@ -38,8 +38,8 @@
                 aria-label="Cartridge details" title="Details">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
                stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
-            <circle cx="12" cy="12" r="3.1" />
-            <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.56V21a2 2 0 1 1-4 0v-.11a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1H3a2 2 0 1 1 0-4h.11a1.7 1.7 0 0 0 1.56-1.11 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.56V3a2 2 0 1 1 4 0v.11a1.7 1.7 0 0 0 1 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.56 1H21a2 2 0 1 1 0 4h-.11a1.7 1.7 0 0 0-1.49 1z" />
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 10.8v5.4M12 7.6h.01" />
           </svg>
         </button>
         <button id="btn-close" class="icon-btn" type="button"
@@ -72,6 +72,7 @@
 
       <!-- Bundle mode: per-game list + shared Eject -->
       <ul id="game-list" hidden aria-label="Games on this cartridge"></ul>
+      <p id="bundle-hint" hidden>Press 1–9 to play a game</p>
       <div id="bundle-eject-row" hidden>
         <button id="btn-bundle-eject" class="btn btn--eject" type="button" disabled>
           <span class="btn__label">Eject</span>

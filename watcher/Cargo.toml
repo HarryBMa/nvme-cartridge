@@ -21,6 +21,11 @@ windows-sys = { version = "0.52", features = [
     # carries HBRUSH and HICON. The watcher's window is never painted, but the
     # struct still has to exist to register the class.
     "Win32_Graphics_Gdi",
+    # CreateMutexW, for the single-instance guard. Takes a
+    # *const SECURITY_ATTRIBUTES, hence Win32_Security too, even though the
+    # watcher passes null.
+    "Win32_System_Threading",
+    "Win32_Security",
 ] }
 
 # Host-gated: rc.exe ships with the MSVC toolchain, so this applies when

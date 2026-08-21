@@ -52,11 +52,13 @@ mod windows_watcher {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
-    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, HWND, LPARAM, LRESULT, WPARAM};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::System::Threading::CreateMutexW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostQuitMessage,
-        RegisterClassW, MSG, WM_DESTROY, WM_DEVICECHANGE, WNDCLASSW, WS_OVERLAPPED,
+        CreateWindowExW, DefWindowProcW, DispatchMessageW, EnumWindows, GetClassNameW,
+        GetMessageW, GetWindowTextW, PostMessageW, PostQuitMessage, RegisterClassW, MSG,
+        WM_CLOSE, WM_DESTROY, WM_DEVICECHANGE, WNDCLASSW, WS_OVERLAPPED,
     };
 
     /// A volume has been inserted and is available.
@@ -69,6 +71,10 @@ mod windows_watcher {
 
     /// Files that mark a volume as a cartridge rather than an ordinary drive.
     const MARKERS: [&str; 2] = ["cartridge.conf", "autorun.inf"];
+
+    /// How long AutoPlay's own folder window takes to appear after arrival,
+    /// before it is worth looking for.
+    const AUTOPLAY_WINDOW_DELAY: Duration = Duration::from_millis(900);
 
     /// Header shared by every `WM_DEVICECHANGE` payload.
     ///
@@ -102,6 +108,17 @@ mod windows_watcher {
 
     pub fn run() {
         crate::log::line("watcher starting");
+
+        // Every logon starts this fresh, and a crash-restart from the
+        // scheduled task can overlap the old instance for a moment — without
+        // this, two watchers both hear the same WM_DEVICECHANGE broadcast and
+        // each opens its own launcher window for the same cartridge. The
+        // mutex is never released explicitly: it goes away when the process
+        // does, which is the only time it should.
+        if !acquired_single_instance() {
+            crate::log::line("another watcher is already running; exiting");
+            return;
+        }
 
         // Its own thread: this one is about to block in the message queue for
         // the rest of the session, and PC/SC has its own blocking call.
@@ -245,6 +262,54 @@ mod windows_watcher {
         if crate::launcher::open(&root).is_some() {
             crate::log::line(&format!("{letter}: opened the launcher"));
         }
+
+        // Every cartridge already opts out of the OS running anything on its
+        // own — see cartridge.rs. AutoPlay's "open folder" is the same idea in
+        // reverse: the launcher is the window a cartridge should show, so the
+        // Explorer window AutoPlay opens for it is closed on its own thread,
+        // rather than blocking WM_DEVICECHANGE while it waits for that window
+        // to exist.
+        std::thread::spawn(move || close_autoplay_window(letter));
+    }
+
+    /// Close the Explorer window AutoPlay opened for `letter`, if one exists.
+    ///
+    /// There is no event for "AutoPlay opened a folder", so this waits a beat
+    /// and then looks: Explorer's title for a drive root always includes
+    /// `(X:)`, which is enough to find the right window without COM.
+    fn close_autoplay_window(letter: char) {
+        std::thread::sleep(AUTOPLAY_WINDOW_DELAY);
+
+        let needle = format!("({letter}:)").encode_utf16().collect::<Vec<u16>>();
+        unsafe {
+            EnumWindows(Some(enum_explorer_windows), &needle as *const Vec<u16> as LPARAM);
+        }
+    }
+
+    unsafe extern "system" fn enum_explorer_windows(hwnd: HWND, lparam: LPARAM) -> i32 {
+        let needle = &*(lparam as *const Vec<u16>);
+
+        let mut class = [0u16; 64];
+        let class_len = GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32);
+        // "CabinetWClass" is a real Explorer folder window, not the desktop or
+        // a taskbar/tray host that also happens to own a top-level HWND.
+        if class_len <= 0 || &class[..class_len as usize] != "CabinetWClass".encode_utf16().collect::<Vec<u16>>().as_slice() {
+            return 1; // keep enumerating
+        }
+
+        let mut title = [0u16; 512];
+        let title_len = GetWindowTextW(hwnd, title.as_mut_ptr(), title.len() as i32);
+        if title_len > 0 && contains_utf16(&title[..title_len as usize], needle) {
+            PostMessageW(hwnd, WM_CLOSE, 0, 0);
+        }
+        1
+    }
+
+    fn contains_utf16(haystack: &[u16], needle: &[u16]) -> bool {
+        !needle.is_empty()
+            && haystack
+                .windows(needle.len())
+                .any(|window| window == needle)
     }
 
     /// A cartridge is a volume with a manifest at its root. Retried briefly:
@@ -269,6 +334,22 @@ mod windows_watcher {
             .collect()
     }
 
+    /// True when this process is the only watcher running.
+    ///
+    /// The handle returned by `CreateMutexW` is deliberately leaked: it must
+    /// live for the process's whole lifetime, and the OS reclaims it on exit
+    /// regardless.
+    fn acquired_single_instance() -> bool {
+        let name = wide("Global\\PcCartridgeWatcherSingleInstance");
+        let handle =
+            unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+        if handle == 0 {
+            // Could not even ask; do not block a real launch on this.
+            return true;
+        }
+        unsafe { windows_sys::Win32::Foundation::GetLastError() != ERROR_ALREADY_EXISTS }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -280,6 +361,20 @@ mod windows_watcher {
             assert_eq!(letters_from_mask(0b1100), vec!['C', 'D']);
             assert_eq!(letters_from_mask(0), Vec::<char>::new());
             assert_eq!(letters_from_mask(1 << 25), vec!['Z']);
+        }
+
+        #[test]
+        fn finds_the_drive_letter_wherever_it_sits_in_the_title() {
+            let needle: Vec<u16> = "(D:)".encode_utf16().collect();
+            assert!(contains_utf16(
+                &"TEST (D:)".encode_utf16().collect::<Vec<u16>>(),
+                &needle
+            ));
+            assert!(!contains_utf16(
+                &"TEST (E:)".encode_utf16().collect::<Vec<u16>>(),
+                &needle
+            ));
+            assert!(!contains_utf16(&[], &needle));
         }
     }
 }

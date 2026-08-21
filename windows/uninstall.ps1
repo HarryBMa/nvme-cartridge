@@ -23,6 +23,9 @@ $TaskNames = @(
     "PC GamePak Watcher"
 )
 
+$AutoplayHandlerKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\AutoplayHandlers\Handlers\PCGamePakCartridge"
+$AutoplayEventKey   = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\AutoplayHandlers\Events\StorageOnArrival\Handlers\PCGamePakCartridge"
+
 
 ########################################
 # Remove scheduled tasks
@@ -49,6 +52,21 @@ foreach ($TaskName in $TaskNames) {
     else {
         Write-Host "Scheduled task not found: $TaskName"
     }
+}
+
+
+########################################
+# Remove AutoPlay experiment
+########################################
+
+Write-Host "Removing experimental AutoPlay handler..."
+
+if (Test-Path $AutoplayEventKey) {
+    Remove-Item -Path $AutoplayEventKey -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+if (Test-Path $AutoplayHandlerKey) {
+    Remove-Item -Path $AutoplayHandlerKey -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 

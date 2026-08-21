@@ -49,7 +49,9 @@ use gamepak_core::{create, drives, edit, format, health, settings, sgdb, tuning}
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tauri::{Emitter, WebviewUrl, WebviewWindowBuilder};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
 // --------------------------------------------------------------------------
@@ -181,6 +183,7 @@ fn eject_drive(drive_path: String) -> Result<(), String> {
 fn eject_windows(drive_path: &str) -> Result<(), String> {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
+    use std::time::Duration;
     use windows_sys::Win32::Foundation::{
         CloseHandle, GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE,
     };
@@ -190,6 +193,14 @@ fn eject_windows(drive_path: &str) -> Result<(), String> {
     use windows_sys::Win32::System::Ioctl::{FSCTL_DISMOUNT_VOLUME, FSCTL_LOCK_VOLUME};
     use windows_sys::Win32::System::IO::DeviceIoControl;
 
+    // A drive just plugged in, or a window just closed on it, often still has
+    // Explorer's thumbnail cache or Defender's on-arrival scan holding a
+    // handle for a moment — long enough for the first lock to fail and short
+    // enough that pressing Eject again immediately succeeds. Retried here
+    // instead of surfacing that as a real failure.
+    const ATTEMPTS: u32 = 6;
+    const RETRY_DELAY: Duration = Duration::from_millis(250);
+
     let letter = drive_path.trim_end_matches('\\').trim_end_matches('/');
     let volume_path = format!("\\\\.\\{letter}");
 
@@ -198,80 +209,99 @@ fn eject_windows(drive_path: &str) -> Result<(), String> {
         .chain(std::iter::once(0))
         .collect();
 
-    let handle = unsafe {
-        CreateFileW(
-            wide.as_ptr(),
-            GENERIC_READ | GENERIC_WRITE,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            std::ptr::null(),
-            OPEN_EXISTING,
-            0,
-            0,
-        )
-    };
+    for attempt in 0..ATTEMPTS {
+        if attempt > 0 {
+            std::thread::sleep(RETRY_DELAY);
+        }
 
-    if handle == INVALID_HANDLE_VALUE {
-        return eject_windows_mountvol(drive_path);
-    }
+        let handle = unsafe {
+            CreateFileW(
+                wide.as_ptr(),
+                GENERIC_READ | GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                0,
+                0,
+            )
+        };
 
-    let mut bytes_returned: u32 = 0;
+        if handle == INVALID_HANDLE_VALUE {
+            continue;
+        }
 
-    let locked = unsafe {
-        DeviceIoControl(
-            handle,
-            FSCTL_LOCK_VOLUME,
-            std::ptr::null(),
-            0,
-            std::ptr::null_mut(),
-            0,
-            &mut bytes_returned,
-            std::ptr::null_mut(),
-        )
-    };
+        let mut bytes_returned: u32 = 0;
 
-    if locked == 0 {
+        let locked = unsafe {
+            DeviceIoControl(
+                handle,
+                FSCTL_LOCK_VOLUME,
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                0,
+                &mut bytes_returned,
+                std::ptr::null_mut(),
+            )
+        };
+
+        if locked == 0 {
+            unsafe { CloseHandle(handle) };
+            continue;
+        }
+
+        let dismounted = unsafe {
+            DeviceIoControl(
+                handle,
+                FSCTL_DISMOUNT_VOLUME,
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                0,
+                &mut bytes_returned,
+                std::ptr::null_mut(),
+            )
+        };
+
         unsafe { CloseHandle(handle) };
-        return eject_windows_mountvol(drive_path);
+
+        if dismounted != 0 {
+            return Ok(());
+        }
     }
 
-    let dismounted = unsafe {
-        DeviceIoControl(
-            handle,
-            FSCTL_DISMOUNT_VOLUME,
-            std::ptr::null(),
-            0,
-            std::ptr::null_mut(),
-            0,
-            &mut bytes_returned,
-            std::ptr::null_mut(),
-        )
-    };
-
-    unsafe { CloseHandle(handle) };
-
-    if dismounted != 0 {
-        Ok(())
-    } else {
-        eject_windows_mountvol(drive_path)
-    }
+    eject_windows_mountvol(drive_path)
 }
 
 #[cfg(target_os = "windows")]
 fn eject_windows_mountvol(drive_path: &str) -> Result<(), String> {
-    let letter = drive_path.trim_end_matches('\\').trim_end_matches('/');
-    let status = Command::new("mountvol")
-        .args([letter, "/P"])
-        .status()
-        .map_err(|e| format!("mountvol failed: {e}"))?;
+    use std::time::Duration;
 
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "mountvol /P returned exit code {:?}",
-            status.code()
-        ))
+    const ATTEMPTS: u32 = 3;
+    const RETRY_DELAY: Duration = Duration::from_millis(300);
+
+    let letter = drive_path.trim_end_matches('\\').trim_end_matches('/');
+    let mut last_code = None;
+
+    for attempt in 0..ATTEMPTS {
+        if attempt > 0 {
+            std::thread::sleep(RETRY_DELAY);
+        }
+
+        let status = Command::new("mountvol")
+            .args([letter, "/P"])
+            .status()
+            .map_err(|e| format!("mountvol failed: {e}"))?;
+
+        if status.success() {
+            return Ok(());
+        }
+        last_code = status.code();
     }
+
+    Err(format!(
+        "mountvol /P returned exit code {last_code:?}"
+    ))
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -545,6 +575,32 @@ async fn create_cartridge(
 // Entry point
 // --------------------------------------------------------------------------
 
+fn open_wizard(app: &tauri::AppHandle, open_settings: bool) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window("create") {
+        window.show()?;
+        window.set_focus()?;
+        if open_settings {
+            window.emit("open-settings", ())?;
+        }
+        return Ok(());
+    }
+
+    let window = WebviewWindowBuilder::new(app, "create", WebviewUrl::App("create.html".into()))
+        .title("Create cartridge")
+        .inner_size(880.0, 660.0)
+        .resizable(false)
+        .decorations(false)
+        .transparent(true)
+        .center()
+        .visible(false)
+        .build()?;
+
+    if open_settings {
+        window.emit("open-settings", ())?;
+    }
+    Ok(())
+}
+
 fn main() {
     // Both windows start hidden; the frontend shows itself once it has drawn,
     // so the user never sees an empty frame.
@@ -582,6 +638,27 @@ fn main() {
             create_cartridge,
         ])
         .setup(move |app| {
+            let wizard_item = MenuItem::with_id(app, "open-wizard", "Open wizard", true, None::<&str>)?;
+            let open_settings = MenuItem::with_id(app, "open-settings", "Open settings", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&wizard_item, &open_settings, &quit])?;
+
+            TrayIconBuilder::new()
+                .icon(tauri::include_image!("icons/32x32.png"))
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "open-wizard" => {
+                        let _ = open_wizard(app, false);
+                    }
+                    "open-settings" => {
+                        let _ = open_wizard(app, true);
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .build(app)?;
+
             if wizard {
                 WebviewWindowBuilder::new(app, "create", WebviewUrl::App("create.html".into()))
                     .title("Create cartridge")

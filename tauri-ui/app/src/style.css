@@ -15,12 +15,30 @@
   height: 100vh;
   overflow: hidden;
   border-radius: var(--radius);
-  background: var(--shell);
+  border: 1px solid oklch(1 0 0 / 0.08);
+  background:
+    linear-gradient(
+      180deg,
+      oklch(0.168 0.006 65 / 0.9) 0%,
+      oklch(0.145 0.006 65 / 0.98) 18%,
+      var(--shell) 100%
+    );
   isolation: isolate;
   box-shadow:
-    inset 0 0 0 1px oklch(1 0 0 / 0.08),
-    0 20px 44px -14px oklch(0 0 0 / 0.7);
+    inset 0 1px 0 oklch(1 0 0 / 0.06),
+    0 22px 48px -18px oklch(0 0 0 / 0.72);
   animation: card-in 460ms var(--ease) both;
+}
+
+#card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at top, oklch(1 0 0 / 0.12), transparent 32%),
+    linear-gradient(180deg, transparent 0%, oklch(0 0 0 / 0.1) 100%);
 }
 
 @keyframes card-in {
@@ -164,6 +182,12 @@
   justify-content: space-between;
   gap: 12px;
   padding: 15px 15px 15px 18px;
+  background: linear-gradient(
+    180deg,
+    oklch(0.12 0.004 65 / 0.58) 0%,
+    oklch(0.12 0.004 65 / 0.14) 70%,
+    transparent 100%
+  );
   animation: fade 420ms 260ms linear both;
 }
 
@@ -186,6 +210,7 @@
   height: 6px;
   border-radius: 1px;
   background: var(--accent);
+  box-shadow: 0 0 0 1px oklch(1 0 0 / 0.15);
   animation: pip 2.6s steps(1, end) infinite;
 }
 
@@ -250,6 +275,18 @@
   animation: rise 460ms var(--ease) both;
 }
 
+#bundle-hint {
+  margin: 10px 0 0;
+  font-family: "Spline Sans Mono", ui-monospace, monospace;
+  font-size: 9px;
+  line-height: 1.4;
+  color: var(--ink-3);
+}
+
+#bundle-hint[hidden] {
+  display: none;
+}
+
 #button-row {
   display: flex;
   gap: 9px;
@@ -268,13 +305,15 @@
   flex: 1;
   border: 0;
   padding: 0 18px;
-  background: var(--accent);
+  background: linear-gradient(180deg, color-mix(in oklch, var(--accent) 100%, white 8%) 0%, var(--accent) 100%);
   color: var(--accent-ink);
-  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.26);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.26),
+    0 12px 18px -16px oklch(0 0 0 / 0.9);
 }
 
 .btn--play:hover:not(:disabled) {
-  background: color-mix(in oklch, var(--accent) 88%, white);
+  background: linear-gradient(180deg, color-mix(in oklch, var(--accent) 100%, white 12%) 0%, color-mix(in oklch, var(--accent) 90%, white) 100%);
 }
 
 .btn--play .btn__key {
@@ -296,13 +335,14 @@
 .btn--eject {
   padding: 0 17px;
   border: 1px solid var(--hairline);
-  background: oklch(0.14 0.004 65 / 0.45);
+  background: linear-gradient(180deg, oklch(0.18 0.004 65 / 0.8) 0%, oklch(0.13 0.004 65 / 0.8) 100%);
   color: var(--ink);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.05);
 }
 
 .btn--eject:hover:not(:disabled) {
-  border-color: oklch(1 0 0 / 0.32);
-  background: oklch(0.18 0.004 65 / 0.7);
+  border-color: oklch(1 0 0 / 0.28);
+  background: linear-gradient(180deg, oklch(0.19 0.005 65 / 0.9) 0%, oklch(0.15 0.005 65 / 0.9) 100%);
 }
 
 .btn--eject .btn__key {
@@ -340,7 +380,7 @@ body.is-gamepad :focus {
   margin: 0;
   padding: 9px 11px;
   border-radius: 5px;
-  border-left: 2px solid color-mix(in oklch, var(--accent) 70%, transparent);
+  border-left: 1px solid color-mix(in oklch, var(--accent) 55%, transparent);
   background: oklch(0.18 0.005 65 / 0.6);
   font-size: 11.5px;
   line-height: 1.55;
@@ -461,10 +501,32 @@ body.is-gamepad :focus {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: oklch(0.12 0.004 65 / 0.82);
-  border-radius: 5px;
+  background: linear-gradient(180deg, oklch(0.12 0.004 65 / 0.9) 0%, oklch(0.13 0.004 65 / 0.72) 100%);
+  border-radius: 6px;
   padding: 6px 8px 6px 6px;
   border: 1px solid oklch(1 0 0 / 0.08);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.04);
+  transition: border-color 140ms linear, background-color 140ms linear, transform 140ms var(--ease);
+}
+
+.game-row__key {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 24px;
+  flex-shrink: 0;
+  border: 1px solid oklch(1 0 0 / 0.14);
+  border-radius: 3px;
+  background: oklch(1 0 0 / 0.06);
+  color: var(--ink-2);
+  font-family: "Spline Sans Mono", ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.game-row:hover {
+  border-color: oklch(1 0 0 / 0.14);
+  background: linear-gradient(180deg, oklch(0.14 0.005 65 / 0.9) 0%, oklch(0.14 0.005 65 / 0.8) 100%);
 }
 
 .game-row__cover {
@@ -474,6 +536,7 @@ body.is-gamepad :focus {
   border-radius: 3px;
   flex-shrink: 0;
   background: oklch(0.2 0.005 65);
+  box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.08);
 }
 
 .game-row__cover:not([src]),

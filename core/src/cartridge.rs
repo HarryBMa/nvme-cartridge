@@ -55,9 +55,9 @@ pub struct CartridgeInfo {
 
 /// Does this cartridge carry the game, or just point at it?
 pub fn holds_game(root: &Path) -> bool {
-    // Written by the wizard's "copy the game" step, and the same layout Steam
-    // uses for any library folder.
-    root.join("steamapps").join("common").is_dir()
+    // Written by the wizard's "copy the game" step: the Steam library layout
+    // for a Steam game, or the wizard's own Games/ folder for a portable one.
+    root.join("steamapps").join("common").is_dir() || root.join("Games").is_dir()
 }
 
 /// Largest cover we will base64 into the webview. A cartridge is not a trusted
@@ -514,6 +514,28 @@ mod tests {
         );
 
         std::fs::create_dir_all(scratch.join("steamapps/common/X")).unwrap();
+        assert!(
+            read_cartridge_info(scratch.path().to_str().unwrap())
+                .unwrap()
+                .holds_game
+        );
+    }
+
+    #[test]
+    fn a_portable_copy_also_counts_as_carrying_the_game() {
+        let scratch = crate::testutil::Scratch::new("holds-portable");
+        std::fs::write(
+            scratch.join("cartridge.conf"),
+            "title=X\nexecutable=Games/X/X.exe\n",
+        )
+        .unwrap();
+        assert!(
+            !read_cartridge_info(scratch.path().to_str().unwrap())
+                .unwrap()
+                .holds_game
+        );
+
+        std::fs::create_dir_all(scratch.join("Games/X")).unwrap();
         assert!(
             read_cartridge_info(scratch.path().to_str().unwrap())
                 .unwrap()
