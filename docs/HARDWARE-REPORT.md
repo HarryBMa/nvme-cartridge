@@ -38,13 +38,15 @@ All four are `DriveType = Fixed`.
 
 | Item | Value |
 |---|---|
-| Device | `\\.\PHYSICALDRIVE4` |
+| Device | `\\.\PHYSICALDRIVE4` — disk 4 |
 | Model | JMicron Tech SCSI Disk Device |
 | Serial | DD56419883914 |
 | Size | 256052966400 bytes (238.5 GiB / 256 GB) |
 | Media type | External hard disk media |
-| Partitions | **none — no partition table** |
-| Drive letter | **none** |
+| Partition style | **MBR** — one partition, offset 1048576, MBR type `FAT32 XINT13` |
+| Filesystem | exFAT, label `External`, 238.40 GB free of 238.47 |
+| Drive letter | **D:** |
+| `GetDriveTypeW("D:\")` | **3 = `DRIVE_FIXED`** — not `DRIVE_REMOVABLE` (see Phase 1) |
 | Bridge | USB `VID_152D&PID_A583` = **JMicron JMS583**, USB 3.1 Gen 2 NVMe-to-USB bridge |
 | Driver bound | `USB Attached SCSI (UAS)` — **UASP, not BOT** |
 | USB parent | `USB\ROOT_HUB30` — USB 3.x root hub |
@@ -54,8 +56,80 @@ All four are `DriveType = Fixed`.
 
 **First real hardware measurement the project has ever had:** the enclosure
 negotiates **UASP**, not BOT — Windows bound `uaspstor`, not `USBSTOR`. That is
-the good outcome. Negotiated USB link speed not yet read; it needs the drive to
-be enumerated by the storage stack first (Open issue 2).
+the good outcome. Negotiated USB link speed not yet read; the wizard health
+readout is the next place to look for it (Phase 2).
+
+---
+
+## Phase 1 — prepare the NVMe — **PASS**
+
+The enclosure is **external, in a USB enclosure, not internal** — so
+insert-detection has something to detect. JMicron JMS583 bridge, USB 3.1 Gen 2,
+on a USB 3.x root hub, `Port_#0005.Hub_#0004`.
+
+It was found in a state the storage stack would not enumerate at all (see the
+former Open issue 2, now closed below). **A physical replug cleared it.** After
+the replug it came up already initialised and already formatted:
+
+| Item | State found in, after replug |
+|---|---|
+| Disk number | 4 |
+| Partition style | MBR |
+| Partitions | 1, spanning the disk |
+| Filesystem | exFAT |
+| Volume label | `External` |
+| Drive letter | D: |
+| Contents | empty — `$RECYCLE.BIN` and `System Volume Information` only |
+| Free | 238.40 GB of 238.47 GB |
+
+So no `Initialize-Disk` step was needed, and none was run. Nothing destructive
+has been done to it.
+
+**Docs gap, worth recording:** the brief expects an uninitialised drive to be set
+up as **GPT**; this one arrived as **MBR**. The wizard formats the volume in
+Phase 3 but does not repartition, so the cartridge will sit on an MBR disk. That
+is fine for exFAT and for the launcher, but it means the partition style a
+cartridge ends up with is whatever the drive already had — the wizard has no
+opinion about it, and the docs do not say so.
+
+### Finding: `GetDriveType` reports this enclosure as FIXED, and the drive list follows
+
+`GetDriveTypeW("D:\")` returns **3, `DRIVE_FIXED`** — not `DRIVE_REMOVABLE`.
+That is normal for a USB NVMe bridge, and `core/src/drives.rs:296` already
+anticipates it, accepting both kinds with the comment *"A USB-C NVMe enclosure
+usually reports FIXED, not REMOVABLE, so both are offered."* Without that, the
+cartridge drive would not appear in the wizard at all. Correct call.
+
+The cost is the other half of the filter. The only drive `list()` excludes is
+`%SystemDrive%`, so on this host the wizard drive list will offer, alongside the
+cartridge:
+
+- B: Milo (931.5 GB, 159.2 GB free)
+- E: Harry (465.8 GB, 438.3 GB free)
+- F: GAMES (1863.0 GB, 108.2 GB free)
+
+The brief expected the list to show the NVMe and **not** fixed disks. It cannot,
+because on Windows the cartridge is itself a fixed disk by this API. What stands
+between a mis-click and erasing B: Milo is the format confirmation gate
+(`core/src/format.rs:192`), which refuses until the drive's current name is typed
+back exactly. That gate is real and the UI prints the exact string to type
+(`create.js:849`). Verified by reading, not yet exercised — Phase 3.
+
+Flagged as a design question rather than fixed, since narrowing the filter would
+hide the cartridge. See Open question 5.
+
+### Wart: on Windows the "current label" is a display string
+
+`format::current_label` reads `TargetDrive::label`. On Linux that is the bare
+volume label (`CART`); on Windows `drives.rs:317` builds it for display as
+`External (D:)`, label plus letter. So the Windows gate demands
+`External (D:)` typed back, not `External`.
+
+Harmless in practice — the UI shows the exact string in both the prompt and the
+placeholder, so there is nothing to guess — and it makes the gate marginally
+harder to satisfy by accident. But the two platforms ask for different things
+from the same code path. Left alone; noted for Phase 3, where it can be
+confirmed against the real dialog.
 
 ---
 
@@ -157,7 +231,7 @@ Worth deciding — your call, not done:
   stated in the repo instead of being discovered like this. The repo currently
   has no toolchain file and no stated MSRV.
 
-### Open issue 2 — the cartridge drive is not enumerated by the storage stack
+### Open issue 2 (CLOSED — physical replug) — the cartridge drive was not enumerated by the storage stack
 
 `\\.\PHYSICALDRIVE4` is present and healthy at the PnP and WMI layers, but the
 Windows storage stack does not list it:
@@ -174,8 +248,16 @@ Possible causes, untested: the NVMe inside the enclosure is not responding to
 the bridge; the storage service will only resolve it with elevation; or a stale
 enumeration that a physical replug would clear.
 
-Blocks Phase 1 onward. Nothing destructive has been attempted, and no drive
-letter has been chosen.
+**Resolved by unplugging the enclosure and plugging it back in.** It then
+enumerated as disk 4 with drive letter D:, already MBR and already exFAT. So it
+was a stale enumeration, not a dead NVMe and not an elevation problem.
+
+Worth keeping in the report because the failure mode is nasty: every layer that
+reports health said the device was fine — `Win32_DiskDrive` `Status = OK`,
+`Get-PnpDevice` `Present = True` `Problem = CM_PROB_NONE` — while the layer that
+matters listed nothing, and `Update-HostStorageCache` did not shake it loose. If
+a user hits this, the wizard will simply show no cartridge drive and give no
+reason. **Replug first** is the answer, and it is not written down anywhere.
 
 ### Open issue 3 — the session is not elevated
 
@@ -209,6 +291,28 @@ Worth noting for the host: **C: has 23.3 GB free of 930.5 GB.** A read-only
 `chkdsk C: /scan` would be a reasonable precaution given the corruption pattern.
 Not run — needs elevation.
 
+### Open question 5 — the drive list offers every non-system fixed disk
+
+Raised by Phase 1. `drives::list()` on Windows takes both `DRIVE_REMOVABLE` and
+`DRIVE_FIXED` — it has to, because a USB NVMe enclosure reports FIXED — and then
+excludes only `%SystemDrive%`. On a machine with several data disks, all of them
+appear in the wizard as things it will happily format.
+
+Not fixed, because the obvious narrowing breaks the product: filter to
+`DRIVE_REMOVABLE` and the cartridge disappears.
+
+Options, none applied:
+
+1. Leave it. The typed-label gate is the guard, and it is a good one.
+2. Rank and mark: query `MSFT_Disk` for `BusType = USB` and sort those first,
+   or badge the rest as "internal disk". Cosmetic, no behaviour change, keeps
+   every drive reachable.
+3. Refuse to *format* a non-USB disk while still listing it, so a fixed disk can
+   receive a cartridge but never be erased by the wizard.
+
+Your call. (2) is the cheap one; (3) is the one that would have prevented the
+worst outcome on this host.
+
 ---
 
 ## Phase status
@@ -216,7 +320,7 @@ Not run — needs elevation.
 | Phase | Status |
 |---|---|
 | 0 — build and unit tests | **PASS** — 169 tests, clippy clean, both binaries built (1 bug found and fixed) |
-| 1 — prepare the NVMe | **Blocked** — Open issue 2 |
+| 1 — prepare the NVMe | **PASS** — external USB enclosure, D:, UASP; needed a replug (former Open issue 2) |
 | 2 — wizard, non-destructive | Not started |
 | 3 — format and copy | Not started |
 | 4 — cartridge contents | Not started |
