@@ -293,12 +293,21 @@ pub fn remember_last_used(game_key: &str, path: &Path) -> Result<(), String> {
     write_last_used_map(&map)
 }
 
+/// Portrait grid sizes, in the order SteamGridDB itself lists them.
+///
+/// These are what a cartridge cover wants: box art, taller than it is wide.
+const COVER_DIMENSIONS: &str = "600x900,342x482,660x930";
+
 fn endpoint_for(game_id: u32, art_type: ArtworkType) -> String {
     match art_type {
         ArtworkType::Grid => format!("{API_BASE}/grids/game/{game_id}?dimensions=600x900,460x215"),
         ArtworkType::Logo => format!("{API_BASE}/logos/game/{game_id}"),
-        // Prefer dedicated covers endpoint; fall back handled by caller.
-        ArtworkType::Cover => format!("{API_BASE}/covers/game/{game_id}"),
+        // There is no /covers endpoint. The v2 API serves grids, heroes, logos
+        // and icons, and a "cover" is a grid in one of the portrait sizes — so
+        // asking for /covers/game/<id> is a 404 every time, for every game.
+        ArtworkType::Cover => {
+            format!("{API_BASE}/grids/game/{game_id}?dimensions={COVER_DIMENSIONS}")
+        }
     }
 }
 
@@ -324,6 +333,12 @@ fn api_key_from(settings: &crate::settings::Settings) -> Result<String, String> 
             "SteamGridDB needs a personal API key. Add one in the wizard's settings.".to_string()
         })
 }
+
+/// What a 404 is turned into: a successful response carrying nothing.
+///
+/// Both envelopes this module parses are `{ success, data }` with `data` a
+/// list, so one body serves for either.
+const NOT_FOUND_BODY: &[u8] = br#"{"success":true,"data":[]}"#;
 
 fn request_with_retry(url: &str) -> Result<Vec<u8>, String> {
     let key = api_key()?;
@@ -359,6 +374,12 @@ fn request_with_retry(url: &str) -> Result<Vec<u8>, String> {
                     };
                     std::thread::sleep(base);
                     continue;
+                }
+                if code == 404 {
+                    // Nothing there. Not an error worth showing: a game with no
+                    // artwork of the requested kind is an ordinary result, and
+                    // the caller can still fall back to another kind.
+                    return Ok(NOT_FOUND_BODY.to_vec());
                 }
                 return Err(format!("SteamGridDB returned HTTP {code} for {url}"));
             }
@@ -410,7 +431,8 @@ pub fn get_artwork(game_id: u32, art_type: ArtworkType) -> Result<Vec<Artwork>, 
     let mut parsed: ArtworkEnvelope = serde_json::from_slice(&body)
         .map_err(|e| format!("invalid SteamGridDB artwork response: {e}"))?;
 
-    // Some games have no dedicated "covers"; fallback to portrait grids.
+    // Not every game has portrait box art. Widening to the unrestricted grid
+    // query picks up the landscape banners rather than showing nothing.
     if parsed.data.is_empty() && art_type == ArtworkType::Cover {
         let fallback = endpoint_for(game_id, ArtworkType::Grid);
         body = request_with_retry(&fallback)?;
@@ -470,6 +492,46 @@ mod tests {
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn every_artwork_request_goes_to_an_endpoint_that_exists() {
+        // The v2 API serves grids, heroes, logos and icons. There is no
+        // /covers, so asking for one 404s for every game — which is exactly
+        // what it did, on every cover lookup, until this was pinned down.
+        for art_type in [ArtworkType::Grid, ArtworkType::Logo, ArtworkType::Cover] {
+            let url = endpoint_for(4997889, art_type);
+            assert!(
+                !url.contains("/covers/"),
+                "{art_type:?} asks for a route that does not exist: {url}"
+            );
+            let route = url
+                .trim_start_matches(API_BASE)
+                .split('/')
+                .nth(1)
+                .unwrap_or_default();
+            assert!(
+                matches!(route, "grids" | "heroes" | "logos" | "icons"),
+                "{art_type:?} asks for /{route}/, which is not a v2 route: {url}"
+            );
+        }
+
+        // A cover is a grid in a portrait size, so it must say which sizes.
+        let cover = endpoint_for(4997889, ArtworkType::Cover);
+        assert!(cover.contains("dimensions=600x900"), "{cover}");
+    }
+
+    #[test]
+    fn nothing_there_is_an_empty_list_rather_than_a_failure() {
+        // A 404 is turned into an empty success so a game with no artwork of
+        // one kind can still fall back to another.
+        let parsed: ArtworkEnvelope = serde_json::from_slice(NOT_FOUND_BODY).unwrap();
+        assert!(parsed.success);
+        assert!(parsed.data.is_empty());
+
+        let parsed: GamesEnvelope = serde_json::from_slice(NOT_FOUND_BODY).unwrap();
+        assert!(parsed.success);
+        assert!(parsed.data.is_empty());
+    }
 
     #[test]
     fn no_request_is_made_until_the_user_opts_in() {

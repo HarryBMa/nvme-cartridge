@@ -329,6 +329,36 @@ pub fn installed_games(root: &Path) -> Vec<SteamGame> {
     out
 }
 
+/// Apps Steam installs beside games that are not games.
+///
+/// Steam writes an `appmanifest` for these exactly as it does for a game, and
+/// they are fully installed, so nothing else here distinguishes them. They are
+/// listed by id because the names are localised and change between releases.
+///
+/// Everything below is a runtime or a redistributable bundle: putting one on a
+/// cartridge would produce something with a Play button that starts nothing.
+const NOT_GAMES: [&str; 4] = [
+    "228980",  // Steamworks Common Redistributables
+    "1070560", // Steam Linux Runtime 1.0 (scout)
+    "1391110", // Steam Linux Runtime 2.0 (soldier)
+    "1628350", // Steam Linux Runtime 3.0 (sniper)
+];
+
+/// Name prefixes for the runtimes that get a new app id per release, which is
+/// more of them than a list of ids can keep up with. Both names are Valve's own
+/// product names and are not translated.
+const NOT_GAME_PREFIXES: [&str; 2] = ["Proton ", "Steam Linux Runtime"];
+
+fn is_not_a_game(app_id: &str, name: &str) -> bool {
+    if NOT_GAMES.contains(&app_id) {
+        return true;
+    }
+    let name = name.trim();
+    NOT_GAME_PREFIXES
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+}
+
 /// Build a game from one `appmanifest_*.acf`, or `None` if it is not a usable
 /// installed game.
 pub fn game_from_manifest(text: &str, steam_root: &Path) -> Option<SteamGame> {
@@ -347,6 +377,10 @@ pub fn game_from_manifest(text: &str, steam_root: &Path) -> Option<SteamGame> {
         .filter(|s| !s.is_empty())
         .unwrap_or("Unknown game")
         .to_string();
+
+    if is_not_a_game(&app_id, &name) {
+        return None;
+    }
 
     // Skip games that are only partially there — a download in progress would
     // make a cartridge that cannot play.
@@ -593,6 +627,39 @@ mod tests {
             games.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(),
             vec!["apple", "Zebra"]
         );
+    }
+
+    #[test]
+    fn runtimes_and_redistributables_are_not_offered_as_games() {
+        // Steam writes these an appmanifest exactly as it does a game, and they
+        // are fully installed, so nothing else tells them apart. A cartridge
+        // made from one would have a Play button that starts nothing.
+        assert!(game_from_manifest(
+            r#""AppState" { "appid" "228980" "name" "Steamworks Common Redistributables" "StateFlags" "4" }"#,
+            Path::new("/steam"),
+        )
+        .is_none());
+
+        // Proton and the Linux runtimes take a new app id per release, so the
+        // name is what catches the ones no list can keep up with.
+        assert!(game_from_manifest(
+            r#""AppState" { "appid" "2805730" "name" "Proton 9.0" "StateFlags" "4" }"#,
+            Path::new("/steam"),
+        )
+        .is_none());
+        assert!(game_from_manifest(
+            r#""AppState" { "appid" "1628350" "name" "Steam Linux Runtime 3.0 (sniper)" "StateFlags" "4" }"#,
+            Path::new("/steam"),
+        )
+        .is_none());
+
+        // A game whose name merely starts similarly is still a game.
+        let game = game_from_manifest(
+            r#""AppState" { "appid" "42" "name" "Protonaut" "StateFlags" "4" }"#,
+            Path::new("/steam"),
+        )
+        .expect("Protonaut is a game");
+        assert_eq!(game.name, "Protonaut");
     }
 
     #[test]
