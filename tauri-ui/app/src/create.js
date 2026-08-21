@@ -15,6 +15,7 @@
  *   sgdb_download_artwork({ url, cacheKey, gameKey? }) -> "/abs/path/image.jpg"
  *   sgdb_last_used_artwork({ gameKey }) -> { path, dataUri } | null
  *   pick_cover_image()               -> { path, preview } | null
+ *   pick_game_folder()               -> { path, name, sizeBytes, choices[] } | null
  *   host_platform()                  -> "windows" | "linux" | …
  *   read_cartridge_for_edit({ drivePath }) -> { title, cover, games[], … }
  *   update_cartridge({ request })    -> { confPath, coverWritten, warnings[] }
@@ -22,7 +23,8 @@
  *   apply_tuning({ drivePath, tweaks, applying }) -> [what was done, …]
  *   list_target_drives()             -> [{ path, label, totalBytes, freeBytes, hasCartridge }]
  *   format_plan({ drivePath })       -> { path, currentLabel, device, totalBytes, warning }
- *   executable_choices({ playniteId }) -> [{ relative, name, score }]  best first
+ *   executable_choices({ playniteId } | { sourceDir, title })
+ *                                    -> [{ relative, name, score }]  best first
  *   create_cartridge({ request })    -> { confPath, coverWritten, autorunWritten, icon,
  *                                          formatted, formattedFilesystem,
  *                                          gameCopied, bytesCopied,
@@ -44,6 +46,9 @@ const el = {
   customTitle: document.getElementById("custom-title"),
   customExec: document.getElementById("custom-exec"),
   btnCustom: document.getElementById("btn-custom"),
+  btnPickFolder: document.getElementById("btn-pick-folder"),
+  btnClearFolder: document.getElementById("btn-clear-folder"),
+  folderChosen: document.getElementById("folder-chosen"),
   playniteLocate: document.getElementById("playnite-locate"),
   playniteRoot: document.getElementById("playnite-root"),
   btnPlayniteLocate: document.getElementById("btn-playnite-locate"),
@@ -76,9 +81,11 @@ const el = {
   unregister: document.getElementById("btn-unregister"),
   close: document.getElementById("btn-close"),
   progress: document.getElementById("progress"),
+  progressTrack: document.getElementById("progress-track"),
   progressFill: document.getElementById("progress-fill"),
   progressText: document.getElementById("progress-text"),
   status: document.getElementById("status"),
+  readyMessage: document.getElementById("ready-message"),
   optCopyLabel: document.getElementById("opt-copy-label"),
   optCloseSteamRow: document.getElementById("opt-close-steam-row"),
   optCloseSteam: document.getElementById("opt-close-steam"),
@@ -130,6 +137,14 @@ let drives = [];
 let selectedGame = null;
 let selectedDrive = null;
 let manualMode = false;
+/**
+ * The game folder the user pointed at, when they did.
+ *
+ * `{ path, name, sizeBytes, choices }`. This is what makes a cartridge of a
+ * game no launcher knows about: the folder is copied and Play is pointed at
+ * a file inside it, exactly as for a Playnite game with an install directory.
+ */
+let chosenFolder = null;
 /** What the backend says formatting the chosen drive would destroy. */
 let formatPlan = null;
 let building = false;
@@ -191,6 +206,9 @@ function renderGames() {
 
   for (const game of matches) {
     const li = document.createElement("li");
+    // An option has to be owned by the listbox; a plain listitem in between
+    // orphans it and aria-selected is dropped on the floor.
+    li.setAttribute("role", "presentation");
     const row = document.createElement("button");
     row.type = "button";
     row.className = "row";
@@ -242,6 +260,9 @@ async function selectGame(game) {
   el.custom.hidden = true;
   selectedGame = game;
   selectedCoverSource = null;
+  // The folder belonged to the by-hand entry that is being left behind.
+  chosenFolder = null;
+  renderChosenFolder();
 
   el.previewTitle.textContent = game.name;
   el.previewSub.textContent = game.executable;
@@ -309,10 +330,57 @@ function enterManualMode() {
   setPreviewArt("", "");
   el.previewTitle.textContent = "By hand";
   el.previewSub.textContent = "No cover art will be copied.";
+  renderChosenFolder();
   renderGames();
   refreshOptions();
   refreshCreateButton();
   el.customTitle.focus();
+}
+
+/** Show, or stop showing, the folder the user chose. */
+function renderChosenFolder() {
+  el.btnClearFolder.hidden = !chosenFolder;
+  el.folderChosen.hidden = !chosenFolder;
+  const label = el.btnPickFolder.querySelector(".btn__label") ?? el.btnPickFolder;
+  if (!chosenFolder) {
+    label.textContent = "Choose folder…";
+    return;
+  }
+  label.textContent = "Change folder…";
+  const size = chosenFolder.sizeBytes ? ` · ${formatBytes(chosenFolder.sizeBytes)}` : "";
+  el.folderChosen.textContent = `${chosenFolder.path}${size}`;
+}
+
+async function pickGameFolder() {
+  el.btnPickFolder.disabled = true;
+  try {
+    const picked = await invoke("pick_game_folder");
+    // Cancelled. Whatever was chosen before stays chosen.
+    if (!picked) return;
+
+    chosenFolder = picked;
+    // The folder name is nearly always the title, so offer it rather than
+    // making it be typed. Anything already typed is left alone.
+    if (!el.customTitle.value.trim()) el.customTitle.value = picked.name;
+    el.previewTitle.textContent = el.customTitle.value.trim() || picked.name;
+    el.previewSub.textContent = picked.path;
+    renderChosenFolder();
+    refreshOptions();
+    await refreshExePicker();
+    refreshCreateButton();
+  } catch (error) {
+    status(String(error), "error");
+  } finally {
+    el.btnPickFolder.disabled = false;
+  }
+}
+
+async function clearGameFolder() {
+  chosenFolder = null;
+  renderChosenFolder();
+  refreshOptions();
+  await refreshExePicker();
+  refreshCreateButton();
 }
 
 /* ----------------------------------------------------------------- bundle */
@@ -647,6 +715,9 @@ function renderDrives() {
 
   for (const drive of drives) {
     const li = document.createElement("li");
+    // An option has to be owned by the listbox; a plain listitem in between
+    // orphans it and aria-selected is dropped on the floor.
+    li.setAttribute("role", "presentation");
     const row = document.createElement("button");
     row.type = "button";
     row.className = "row";
@@ -741,7 +812,11 @@ function refreshOptions() {
   // Every chosen game has to be copyable, since the option copies all of them.
   const copyable = bundle
     ? list.length > 0 && list.every((g) => g.canCopy)
-    : !manualMode && Boolean(selectedGame?.canCopy);
+    : manualMode
+      // By hand, a folder is the whole of what makes a game copyable: there is
+      // no library entry to ask where it is installed.
+      ? Boolean(chosenFolder)
+      : Boolean(selectedGame?.canCopy);
   el.optCopy.disabled = !copyable;
   if (!copyable) el.optCopy.checked = false;
 
@@ -762,7 +837,7 @@ function refreshOptions() {
       ? "Also registers the drive as a Steam library, so Steam plays from the cartridge instead of your internal copy."
       : "Copies the game's folder onto the cartridge and points Play at a file inside it. No launcher needed.";
   } else if (manualMode) {
-    hint = "Only available for a game picked from the list.";
+    hint = "Choose the game's folder above and it can be copied across.";
   } else if (chosen.length === 0) {
     hint = "Pick a game first.";
   } else {
@@ -813,10 +888,10 @@ async function refreshExePicker() {
   // game, so each game's program is picked by the ranking in portable.rs.
   const needed =
     el.optCopy.checked &&
-    !manualMode &&
     !isBundleMode() &&
-    selectedGame &&
-    selectedGame.library !== "steam";
+    (manualMode
+      ? Boolean(chosenFolder)
+      : Boolean(selectedGame) && selectedGame.library !== "steam");
 
   el.exePick.hidden = !needed;
   if (!needed) {
@@ -828,7 +903,14 @@ async function refreshExePicker() {
   el.exeHint.textContent = "Looking for the game's program…";
 
   try {
-    exeCandidates = await invoke("executable_choices", { playniteId: selectedGame.id });
+    // A folder the user chose is looked in directly; otherwise Playnite is
+    // asked where the game lives.
+    exeCandidates = chosenFolder
+      ? await invoke("executable_choices", {
+          sourceDir: chosenFolder.path,
+          title: el.customTitle.value.trim() || chosenFolder.name,
+        })
+      : await invoke("executable_choices", { playniteId: selectedGame.id });
   } catch (error) {
     exeCandidates = [];
     el.exeHint.textContent = String(error);
@@ -1063,6 +1145,7 @@ function intent() {
       executable: el.customExec.value.trim(),
       appId: null,
       playniteId: null,
+      sourceDir: chosenFolder?.path ?? null,
     };
   }
   if (selectedGame) {
@@ -1079,8 +1162,17 @@ function intent() {
 function refreshCreateButton() {
   if (building) {
     el.create.disabled = true;
+    el.readyMessage.textContent = "Writing the cartridge…";
     return;
   }
+
+  el.create.querySelector(".btn__label").textContent = el.optFormat.checked
+    ? "Format and write cartridge"
+    : "Write cartridge";
+
+  const setReady = (message) => {
+    el.readyMessage.textContent = message ? `Ready when: ${message}` : "Ready to write.";
+  };
 
   // Bundle: need 2+ games and a drive. Check for space overflow.
   if (isBundleMode()) {
@@ -1103,11 +1195,19 @@ function refreshCreateButton() {
       ok = Boolean(formatPlan) && typed === formatPlan.currentLabel && Boolean(el.formatLabel.value.trim());
     }
     el.create.disabled = !ok;
+    setReady(
+      ok ? "" : !hasTitle ? "name the collection" : !selectedDrive ? "choose a cartridge" : noSpace ? "free enough space" : el.optFormat.checked && !formatPlan ? "load the drive format details" : el.optFormat.checked ? "type the current drive name to confirm" : "finish the cartridge choices",
+    );
     return;
   }
 
   const want = intent();
-  let ok = Boolean(want && want.title && want.executable && selectedDrive);
+  // A folder being copied supplies the launch target itself: the wizard picks
+  // the program inside it, so there is nothing for the user to type.
+  const copyingFolder = manualMode && Boolean(chosenFolder) && el.optCopy.checked;
+  let ok = Boolean(
+    want && want.title && (want.executable || copyingFolder) && selectedDrive,
+  );
 
   // A non-Steam copy has nothing to point Play at until a program is chosen.
   if (ok && !el.exePick.hidden && exeCandidates.length === 0) {
@@ -1130,6 +1230,9 @@ function refreshCreateButton() {
     ok = Boolean(formatPlan) && typed === formatPlan.currentLabel && Boolean(el.formatLabel.value.trim());
   }
   el.create.disabled = !ok;
+  setReady(
+    ok ? "" : !want?.title ? "choose a game or enter a title" : !selectedDrive ? "choose a cartridge" : !want.executable && !copyingFolder ? "choose what Play should start" : !el.exePick.hidden && exeCandidates.length === 0 ? "choose a runnable program" : el.optCopy.checked && selectedGame && selectedDrive && selectedGame.sizeOnDisk > 0 && selectedGame.sizeOnDisk > (el.optFormat.checked ? drives.find((d) => d.path === selectedDrive)?.totalBytes : drives.find((d) => d.path === selectedDrive)?.freeBytes) ? "free enough space" : el.optFormat.checked && !formatPlan ? "load the drive format details" : el.optFormat.checked ? "type the current drive name to confirm" : "finish the cartridge choices",
+  );
 }
 
 function showProgress(on) {
@@ -1138,6 +1241,8 @@ function showProgress(on) {
     el.progressFill.style.setProperty("--progress-pct", "0");
     el.progressFill.classList.remove("is-indeterminate");
     el.progressText.textContent = "";
+    el.progressTrack.removeAttribute("aria-valuenow");
+    el.progressTrack.removeAttribute("aria-valuetext");
   }
 }
 
@@ -1149,10 +1254,20 @@ function onProgress(p) {
     el.progressFill.style.setProperty("--progress-pct", `${(pct / 100).toFixed(3)}`);
     el.progressText.textContent =
       `${p.message} ${formatBytes(p.doneBytes)} of ${formatBytes(p.totalBytes)}`;
+    // The bar is the only thing moving for minutes at a time, so it carries
+    // real progressbar semantics rather than leaving a screen reader in
+    // silence between the first click and the final status line.
+    el.progressTrack.setAttribute("aria-valuenow", pct.toFixed(0));
+    el.progressTrack.setAttribute(
+      "aria-valuetext",
+      `${p.message} ${formatBytes(p.doneBytes)} of ${formatBytes(p.totalBytes)}, ${pct.toFixed(0)}%`,
+    );
   } else {
     // Steps without a byte count (format, autorun) still need to look alive.
     el.progressFill.classList.add("is-indeterminate");
     el.progressText.textContent = p.message;
+    el.progressTrack.removeAttribute("aria-valuenow");
+    el.progressTrack.setAttribute("aria-valuetext", p.message);
   }
 }
 
@@ -1203,6 +1318,7 @@ async function writeCartridge() {
         executable: want.executable,
         appId: want.appId,
         playniteId: want.playniteId,
+        sourceDir: want.sourceDir ?? null,
         coverSource: selectedCoverSource,
         formatDrive: el.optFormat.checked,
         formatFilesystem: el.formatFilesystem.value,
@@ -1356,6 +1472,8 @@ async function loadDrives({ keepSelection = false, quiet = false } = {}) {
 
 el.search.addEventListener("input", renderGames);
 el.btnCustom.addEventListener("click", enterManualMode);
+el.btnPickFolder.addEventListener("click", pickGameFolder);
+el.btnClearFolder.addEventListener("click", clearGameFolder);
 el.btnSgdb.addEventListener("click", openSgdbDialog);
 el.sgdbSearch.addEventListener("input", queueSgdbSearch);
 el.sgdbType.addEventListener("change", () => {
@@ -1634,6 +1752,16 @@ async function demoInvoke(command, args) {
         { relative: "bin/launcher.exe", name: "launcher.exe", score: -40 },
         { relative: "unins000.exe", name: "unins000.exe", score: -400 },
       ];
+    case "pick_game_folder":
+      return {
+        path: "B:\Games\Split Fiction",
+        name: "Split Fiction",
+        sizeBytes: 74_088_775_680,
+        choices: [
+          { relative: "Split/b1.exe", name: "b1.exe", score: 100 },
+          { relative: "unins000.exe", name: "unins000.exe", score: -400 },
+        ],
+      };
     case "steam_registration":
       return args.drivePath.endsWith("HOLLOW");
     case "unregister_from_steam":

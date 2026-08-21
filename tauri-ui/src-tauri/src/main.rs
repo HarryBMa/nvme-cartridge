@@ -23,13 +23,14 @@
 //   set_settings(settings)                   -> Settings
 //   suggest_collection_name(titles)          -> String
 //   pick_cover_image()                       -> PickedCover | null
+//   pick_game_folder()                       -> PickedGameFolder | null
 //   host_platform()                          -> "windows" | "linux" | …
 //   tuning_plan(drive_path, tweaks, applying) -> Vec<String>  (the commands)
 //   apply_tuning(drive_path, tweaks, applying) -> Vec<String>  (what was done)
 //   game_cover(library, id)                  -> String (data URI)
 //   list_target_drives()                     -> Vec<TargetDrive>
 //   format_plan(drive_path)                  -> FormatPlan
-//   executable_choices(playnite_id)          -> Vec<Candidate>
+//   executable_choices(playnite_id?, source_dir?, title?) -> Vec<Candidate>
 //   steam_registration(drive_path)           -> bool
 //   unregister_from_steam(drive_path)        -> bool
 //   create_cartridge(request)                -> CartridgeResult,
@@ -51,6 +52,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
+use tauri::webview::PageLoadEvent;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
@@ -482,6 +484,55 @@ async fn pick_cover_image(window: tauri::WebviewWindow) -> Option<PickedCover> {
     })
 }
 
+/// What the picker came back with, and what is inside it.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PickedGameFolder {
+    path: String,
+    /// Folder name, offered as the title so it does not have to be typed.
+    name: String,
+    size_bytes: u64,
+    /// What Play could start, best guess first. Empty when nothing here looks
+    /// like a program, which is worth showing before the copy rather than after.
+    choices: Vec<gamepak_core::portable::Candidate>,
+}
+
+/// Ask for a game's folder through the desktop's own file dialog.
+///
+/// The counterpart to picking a game from the list: a game that no launcher
+/// knows about still lives in a folder, and a folder is all the copy needs. As
+/// with the cover picker, the window never names a path — it gets one back only
+/// after the user has pointed at it.
+#[tauri::command]
+async fn pick_game_folder(window: tauri::WebviewWindow) -> Result<Option<PickedGameFolder>, String> {
+    let Some(folder) = window
+        .dialog()
+        .file()
+        .set_title("Choose the game's folder")
+        .blocking_pick_folder()
+    else {
+        return Ok(None);
+    };
+    let path = folder
+        .into_path()
+        .map_err(|e| format!("That folder cannot be read: {e}"))?;
+
+    // Checked here, not merely in the picker: the same rules apply however the
+    // path arrived.
+    let dir = create::check_source_dir(&path.to_string_lossy())?;
+    let name = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+
+    Ok(Some(PickedGameFolder {
+        size_bytes: gamepak_core::portable::tree_size_of(&dir),
+        choices: gamepak_core::portable::find_executables(&dir, &name, None),
+        path: dir.to_string_lossy().into_owned(),
+        name,
+    }))
+}
+
 /// A name for a cartridge carrying several games, worked out from what they are
 /// called. The wizard offers it; the user can always type their own.
 #[tauri::command]
@@ -536,9 +587,18 @@ fn format_plan(drive_path: String) -> Result<format::FormatPlan, String> {
 /// Ranked best-first; the window offers the top one and lets the user change it.
 #[tauri::command]
 fn executable_choices(
-    playnite_id: String,
+    playnite_id: Option<String>,
+    source_dir: Option<String>,
+    title: Option<String>,
 ) -> Result<Vec<gamepak_core::portable::Candidate>, String> {
-    create::executable_choices(&playnite_id)
+    // A folder the user chose is the more specific answer, so it wins.
+    if let Some(dir) = source_dir.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+        return create::executable_choices_in(dir, title.as_deref().unwrap_or_default());
+    }
+    match playnite_id.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        Some(id) => create::executable_choices(id),
+        None => Err("No game folder to look in.".to_string()),
+    }
 }
 
 /// Whether the drive is currently a registered Steam library folder.
@@ -585,19 +645,32 @@ fn open_wizard(app: &tauri::AppHandle, open_settings: bool) -> tauri::Result<()>
         return Ok(());
     }
 
-    let window = WebviewWindowBuilder::new(app, "create", WebviewUrl::App("create.html".into()))
+    let builder = WebviewWindowBuilder::new(app, "create", WebviewUrl::App("create.html".into()));
+    let builder = if open_settings {
+        builder.on_page_load(|window, payload| {
+            if payload.event() == PageLoadEvent::Finished {
+                let _ = window.emit("open-settings", ());
+            }
+        })
+    } else {
+        builder
+    };
+    // Resizable, unlike the popup: 880x660 is logical pixels, so at 150% or
+    // 200% desktop scaling the wizard is taller than the screen it opens on and
+    // a fixed window leaves the title bar and the game list off the edge with
+    // no way back. The minimum keeps both columns usable.
+    let window = builder
         .title("Create cartridge")
         .inner_size(880.0, 660.0)
-        .resizable(false)
+        .min_inner_size(720.0, 520.0)
+        .resizable(true)
         .decorations(false)
         .transparent(true)
         .center()
         .visible(false)
         .build()?;
 
-    if open_settings {
-        window.emit("open-settings", ())?;
-    }
+    let _ = window;
     Ok(())
 }
 
@@ -620,6 +693,7 @@ fn main() {
             set_settings,
             suggest_collection_name,
             pick_cover_image,
+            pick_game_folder,
             cartridge_health,
             read_cartridge_for_edit,
             update_cartridge,

@@ -95,6 +95,9 @@ pub struct BundleGameRequest {
     /// Absolute path to a user-chosen cover image for this game.
     #[serde(default)]
     pub cover_source: Option<String>,
+    /// The game's folder, when the user pointed at one themselves.
+    #[serde(default)]
+    pub source_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -110,6 +113,13 @@ pub struct CartridgeRequest {
     /// Playnite GUID, when the cover should come from Playnite's cache.
     #[serde(default)]
     pub playnite_id: Option<String>,
+    /// The game's folder, when the user pointed at one themselves.
+    ///
+    /// Playnite is not the only way to own a game. A folder chosen here is
+    /// copied exactly as a Playnite install directory would be, which is what
+    /// makes a cartridge of anything that is not in a launcher's library.
+    #[serde(default)]
+    pub source_dir: Option<String>,
     /// Absolute path to a user-chosen cover image instead.
     #[serde(default)]
     pub cover_source: Option<String>,
@@ -175,6 +185,10 @@ impl CartridgeRequest {
             app_id: game.app_id.clone(),
             playnite_id: game.playnite_id.clone(),
             cover_source: game.cover_source.clone(),
+            // Per game, never inherited: the collection has no one folder, and
+            // `..self.clone()` below would otherwise give every game in the
+            // bundle the same source.
+            source_dir: game.source_dir.clone(),
             games: None,
             // The format runs once, before any game is copied.
             format_drive: false,
@@ -996,6 +1010,16 @@ fn copy_portable_game(
         return Err(format!("{} is not there any more", source.display()));
     }
 
+    // Copying the cartridge onto itself never terminates. Reachable as soon as
+    // the source is a folder somebody picked, since the picker will happily
+    // open on the drive being written to.
+    if source == root || source.starts_with(root) {
+        return Err(format!(
+            "{} is on the cartridge already, so there is nothing to copy from",
+            source.display()
+        ));
+    }
+
     let title = sanitize_conf_value(&request.title);
     let folder_name = portable::safe_folder_name(&title);
     // Everything the wizard copies lives under Games/, so the cartridge root
@@ -1050,7 +1074,58 @@ fn copy_portable_game(
 }
 
 /// Where a non-Steam game's files currently live.
+/// Check a folder the user chose before anything is copied out of it.
+///
+/// The path arrives from the window, so it is re-checked here rather than
+/// trusted: a command is reachable whatever the interface allowed. None of this
+/// is about a hostile user — it is about the two mistakes that are easy to make
+/// with a folder picker and expensive to make with a copy.
+pub fn check_source_dir(raw: &str) -> Result<PathBuf, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("No folder was chosen.".to_string());
+    }
+    let dir = PathBuf::from(trimmed);
+
+    if !dir.is_dir() {
+        return Err(format!("{} is not a folder.", dir.display()));
+    }
+
+    // A drive root has no parent. Copying one would take the recycle bin, the
+    // system volume information and every other game on the disk with it.
+    if dir.parent().is_none() {
+        return Err(format!(
+            "{} is a whole drive. Choose the folder that holds the game.",
+            dir.display()
+        ));
+    }
+
+    // Windows itself is never a game, and the mistake is one click away in a
+    // folder picker that opens on C:.
+    for var in ["SystemRoot", "windir"] {
+        if let Some(system) = std::env::var_os(var) {
+            let system = PathBuf::from(system);
+            if dir == system || dir.starts_with(&system) {
+                return Err(format!(
+                    "{} is inside Windows itself, which is not a game.",
+                    dir.display()
+                ));
+            }
+        }
+    }
+
+    Ok(dir)
+}
+
 fn portable_source(request: &CartridgeRequest) -> Result<Option<PathBuf>, String> {
+    // A folder the user chose wins: they said exactly which one, and it is the
+    // only route for a game no launcher knows about.
+    if let Some(chosen) = request.source_dir.as_deref().map(str::trim) {
+        if !chosen.is_empty() {
+            return check_source_dir(chosen).map(Some);
+        }
+    }
+
     let Some(playnite_id) = request.playnite_id.as_deref() else {
         return Ok(None);
     };
@@ -1122,6 +1197,13 @@ fn playnite_play_action(request: &CartridgeRequest) -> Option<String> {
 }
 
 /// Candidates for what Play should start, best guess first.
+pub fn executable_choices_in(dir: &str, title: &str) -> Result<Vec<portable::Candidate>, String> {
+    let dir = check_source_dir(dir)?;
+    // No play action to go on: nothing recorded which file this folder starts,
+    // which is the whole reason the ranking in portable.rs exists.
+    Ok(portable::find_executables(&dir, title, None))
+}
+
 pub fn executable_choices(playnite_id: &str) -> Result<Vec<portable::Candidate>, String> {
     let root = playnite::playnite_root().ok_or_else(|| "Could not find Playnite.".to_string())?;
     let game = playnite::find_exports(&root)
@@ -1637,6 +1719,66 @@ mod tests {
         ] {
             assert!(validate_executable(bad, root).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_chosen_game_folder_is_checked_before_anything_is_copied() {
+        let scratch = crate::testutil::Scratch::new("source");
+        let game = scratch.join("Split Fiction");
+        std::fs::create_dir_all(&game).unwrap();
+
+        assert_eq!(check_source_dir(game.to_str().unwrap()).unwrap(), game);
+        // Surrounding whitespace is a paste, not a different folder.
+        let padded = format!("  {}  ", game.display());
+        assert_eq!(check_source_dir(&padded).unwrap(), game);
+
+        // Nothing chosen, and a path that is not a folder.
+        assert!(check_source_dir("").is_err());
+        assert!(check_source_dir("   ").is_err());
+        std::fs::write(scratch.join("notes.txt"), b"x").unwrap();
+        assert!(check_source_dir(scratch.join("notes.txt").to_str().unwrap()).is_err());
+        assert!(check_source_dir(scratch.join("nope").to_str().unwrap()).is_err());
+
+        // A whole drive: copying one takes every other game on the disk, the
+        // recycle bin and System Volume Information with it.
+        let root = if cfg!(windows) { "C:\\" } else { "/" };
+        let err = check_source_dir(root).unwrap_err();
+        assert!(err.contains("whole drive"), "{err}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_itself_is_never_a_game_folder() {
+        // One click away in a picker that opens on C:.
+        let system = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+        let err = check_source_dir(&system).unwrap_err();
+        assert!(err.contains("inside Windows itself"), "{err}");
+
+        let err = check_source_dir(&format!("{system}\\System32")).unwrap_err();
+        assert!(err.contains("inside Windows itself"), "{err}");
+    }
+
+    #[test]
+    fn a_bundle_does_not_hand_every_game_the_same_folder() {
+        // for_game() fills the rest of the request with `..self.clone()`, so a
+        // source folder set on the collection would otherwise be copied once
+        // per game under each game's name.
+        let request = CartridgeRequest {
+            source_dir: Some("/games/wukong".to_string()),
+            ..Default::default()
+        };
+        let job = request.for_game(&BundleGameRequest {
+            title: "Split Fiction".to_string(),
+            source_dir: Some("/games/split".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(job.source_dir.as_deref(), Some("/games/split"));
+
+        let job = request.for_game(&BundleGameRequest {
+            title: "Hades".to_string(),
+            ..Default::default()
+        });
+        assert_eq!(job.source_dir, None);
     }
 
     #[test]

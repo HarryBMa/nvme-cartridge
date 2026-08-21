@@ -35,7 +35,7 @@
                autocomplete="off" spellcheck="false" aria-label="Search games" />
 
         <div id="games-wrap">
-          <ul id="games" aria-label="Installed games"></ul>
+          <ul id="games" role="listbox" aria-label="Installed games"></ul>
           <p id="games-empty" hidden></p>
         </div>
 
@@ -93,7 +93,7 @@
           <div id="preview-meta">
             <p class="eyebrow" id="preview-eyebrow">Selected</p>
             <h3 id="preview-title">Nothing yet</h3>
-            <p id="preview-sub" class="mono"></p>
+            <p id="preview-sub" class="mono selectable"></p>
             <p id="preview-source" class="field__hint" hidden>From SteamGridDB</p>
             <button id="btn-sgdb" class="btn btn--ghost btn--tiny" type="button" disabled>
               <span class="btn__label">Search SteamGridDB</span>
@@ -107,6 +107,23 @@
             <span class="field__label">Title</span>
             <input id="custom-title" type="text" placeholder="My Game" autocomplete="off" />
           </label>
+          <div class="field">
+            <span class="field__label">The game's folder</span>
+            <div class="folder-pick">
+              <button id="btn-pick-folder" class="btn btn--ghost btn--tiny" type="button">
+                <span class="btn__label">Choose folder…</span>
+              </button>
+              <button id="btn-clear-folder" class="link" type="button" hidden>
+                Clear
+              </button>
+            </div>
+            <p id="folder-chosen" class="field__hint" hidden></p>
+          </div>
+          <p class="field__hint">
+            Pick the folder a game is installed in and it can be copied onto the
+            cartridge, launcher or no launcher. Leave it empty to point Play at
+            something already installed instead.
+          </p>
           <label class="field">
             <span class="field__label">Play should start</span>
             <input id="custom-exec" type="text" placeholder="steam://rungameid/367520"
@@ -124,7 +141,7 @@
         <p id="drive-space" class="field__hint" hidden></p>
 
         <div id="drives-wrap">
-          <ul id="drives" aria-label="Target drives"></ul>
+          <ul id="drives" role="listbox" aria-label="Target drives"></ul>
           <p id="drives-empty" hidden></p>
         </div>
 
@@ -158,60 +175,45 @@
             <p class="field__hint" id="exe-hint"></p>
           </div>
 
-          <label class="opt" id="opt-close-steam-row" hidden>
-            <input id="opt-close-steam" type="checkbox" checked />
-            <span class="opt__body">
-              <span class="opt__label">Close Steam if it is in the way</span>
-              <span class="opt__hint">
-                Steam keeps its library list in memory and writes it out when it
-                exits, so a cartridge it knows about cannot be rewritten while it
-                is running. This asks Steam to close itself and waits — it is not
-                a kill, so anything downloading finishes writing first. Untick it
-                and the build stops instead, before anything is changed.
-              </span>
-            </span>
-          </label>
+          <details id="advanced-options">
+            <summary>Advanced options</summary>
+            <div id="advanced-options-body">
+              <label class="opt" id="opt-close-steam-row" hidden>
+                <input id="opt-close-steam" type="checkbox" checked />
+                <span class="opt__body">
+                  <span class="opt__label">Close Steam if it is in the way</span>
+                  <span class="opt__hint">Steam must close before a registered library drive can be rewritten. It closes normally, not by force.</span>
+                </span>
+              </label>
 
-          <label class="opt" id="opt-verify-row" hidden>
-            <input id="opt-verify" type="checkbox" />
-            <span class="opt__body">
-              <span class="opt__label">Check the copy afterwards</span>
-              <span class="opt__hint">
-                Sums every file as it is written, then reads the cartridge back
-                and compares. Catches the copy that silently half-finished — one
-                extra pass over the drive, so it roughly adds the time the copy
-                itself took to read back.
-              </span>
-            </span>
-          </label>
+              <label class="opt" id="opt-verify-row" hidden>
+                <input id="opt-verify" type="checkbox" />
+                <span class="opt__body">
+                  <span class="opt__label">Check the copy afterwards</span>
+                  <span class="opt__hint">Reads the cartridge back after copying and compares every file. This adds another pass over the drive.</span>
+                </span>
+              </label>
 
-          <label class="opt" id="opt-trim-row" hidden>
-            <input id="opt-trim" type="checkbox" />
-            <span class="opt__body">
-              <span class="opt__label">Release freed space back to the drive</span>
-              <span class="opt__hint">
-                Deleting files frees them in the filesystem, but the drive keeps
-                treating those blocks as used until something tells it otherwise —
-                and nothing sends TRIM to removable media on a schedule. Needs the
-                same permission prompt formatting does.
-              </span>
-            </span>
-          </label>
+              <label class="opt" id="opt-trim-row" hidden>
+                <input id="opt-trim" type="checkbox" />
+                <span class="opt__body">
+                  <span class="opt__label">Release freed space back to the drive</span>
+                  <span class="opt__hint">Tells the drive which deleted blocks it can forget. Requires the same permission as formatting.</span>
+                </span>
+              </label>
 
-          <label class="opt" id="opt-tune-row" hidden>
-            <input id="opt-tune" type="checkbox" />
-            <span class="opt__body">
-              <span class="opt__label">Tune Windows for this cartridge</span>
-              <span class="opt__hint">
-                Excludes the cartridge from Defender's real-time scanning and turns
-                off Search indexing for it — both of which otherwise crawl a freshly
-                copied 60&nbsp;GB game. Asks for administrator once per setting, and
-                can be undone.
-                <button id="btn-tune-commands" class="link" type="button">Show the commands</button>
-                <button id="btn-tune-undo" class="link" type="button" hidden>Undo them</button>
-              </span>
-            </span>
-          </label>
+              <label class="opt" id="opt-tune-row" hidden>
+                <input id="opt-tune" type="checkbox" />
+                <span class="opt__body">
+                  <span class="opt__label">Tune Windows for this cartridge</span>
+                  <span class="opt__hint">Excludes the cartridge from Defender scanning and Search indexing. Both changes can be undone.
+                    <button id="btn-tune-commands" class="link" type="button">Show the commands</button>
+                    <button id="btn-tune-undo" class="link" type="button" hidden>Undo them</button>
+                  </span>
+                </span>
+              </label>
+            </div>
+          </details>
 
           <label class="opt opt--danger">
             <input id="opt-format" type="checkbox" />
@@ -254,12 +256,17 @@
           </button>
         </footer>
 
+        <p id="ready-message" class="field__hint" role="status" aria-live="polite"></p>
+
         <div id="progress" hidden>
-          <div id="progress-track"><div id="progress-fill"></div></div>
+          <div id="progress-track" role="progressbar" aria-label="Writing the cartridge"
+               aria-valuemin="0" aria-valuemax="100"><div id="progress-fill"></div></div>
           <p id="progress-text" class="mono"></p>
         </div>
 
-        <p id="status" role="status" aria-live="polite"></p>
+        <!-- Carries the written path and any problem the build names, so it
+             is one of the few strings in the window worth copying. -->
+        <p id="status" class="selectable" role="status" aria-live="polite"></p>
       </section>
     </div>
   </main>
