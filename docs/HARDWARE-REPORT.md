@@ -212,7 +212,8 @@ prompted, as expected for an unsigned binary; clicked through.
 | Drive list excludes other fixed disks | **FAIL by design** — see Open question 5 |
 | Health readout: link speed, UASP vs BOT | **FAIL — not present in the wizard at all** |
 | Single-game cartridge via the `+` button | **FAIL** — bug found and fixed, below |
-| Search / artwork | Partial — see below |
+| Artwork lookup | **FAIL** — 404 on every cover; bug found and fixed, below |
+| Steam libraries on B: and F: | **PASS** — all three libraries read, 42 games |
 | Nothing written | **PASS** — Write not pressed |
 
 ### Bug found and fixed: Playnite games never appear, and nothing says why
@@ -295,6 +296,60 @@ Fix in commit `8f7a367`: when the bundle holds exactly one game, that game
 becomes the selection, so one `+` makes a single-game cartridge and a second
 hands over to the collection UI. Removing a game leaves the selection alone — a
 game picked by clicking its row was never the bundle's to unpick.
+
+### Bug found and fixed: every cover lookup 404s
+
+Reported from the running wizard:
+
+```
+Artwork lookup failed: SteamGridDB returned HTTP 404 for
+https://www.steamgriddb.com/api/v2/covers/game/4997889
+```
+
+There is no `/covers` route. The v2 API serves `grids`, `heroes`, `logos` and
+`icons`, and a cover is a grid in one of the portrait sizes. So
+`sgdb.rs:301` asked for a route that has never existed, and did it for **every
+game, on every cover lookup** — and `Cover/Poster` is the option the dialog
+selects by default, so this is what a first-time user meets.
+
+There was a fallback to portrait grids, but it could not fire: it ran only when
+the response parsed and came back with an empty list, and a 404 is neither.
+
+Fixed in commit `d42f06a`:
+
+- `ArtworkType::Cover` asks for `/grids/game/<id>?dimensions=600x900,342x482,660x930`.
+- A 404 from any request is read as an empty result rather than an error, so a
+  game with no artwork of one kind falls back to another instead of failing.
+
+Two tests added, one of which asserts that every artwork type targets a route
+the API actually has.
+
+**Not yet re-tested against the live API** — it needs the tester's key, and the
+old binary was still running and holding the executable when this was written.
+
+### Steam libraries: all three are read, and one entry was not a game
+
+Asked whether the games on B: and F: were being seen. They are. Every library in
+`libraryfolders.vdf` is walked:
+
+| Library | Games | Size |
+|---|---|---|
+| `C:\Program Files (x86)\Steam\steamapps` | 0 | 0 GB |
+| `B:\Steam\steamapps` | 3 | 199 GB |
+| `F:\Games\Steam\steamapps` | 39 | 586 GB |
+
+B: is Diablo IV (170 GB), HELLDIVERS 2 (23 GB) and LEGO Harry Potter Years 1-4
+(6 GB); F: holds the other 39.
+
+The C: entry used to be 1: `228980 Steamworks Common Redistributables`, listed
+in the wizard as something a cartridge could be made from. Steam writes it an
+`appmanifest` exactly as it does a game and it is fully installed, so nothing in
+`game_from_manifest` told them apart, and a cartridge made from it would have a
+Play button that starts nothing.
+
+Filtered in the same commit, by id for the redistributables and the Linux
+runtimes, and by name for Proton and Steam Linux Runtime, which take a new app
+id per release. The list is now 42 games, all of them games.
 
 ### Bug: there is no health readout in the wizard
 
