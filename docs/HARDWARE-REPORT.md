@@ -49,7 +49,7 @@ All four are `DriveType = Fixed`.
 | `GetDriveTypeW("D:\")` | **3 = `DRIVE_FIXED`** — not `DRIVE_REMOVABLE` (see Phase 1) |
 | Bridge | USB `VID_152D&PID_A583` = **JMicron JMS583**, USB 3.1 Gen 2 NVMe-to-USB bridge |
 | Driver bound | `USB Attached SCSI (UAS)` — **UASP, not BOT** |
-| USB parent | `USB\ROOT_HUB30` — USB 3.x root hub |
+| USB parent | `USB\ROOT_HUB30` — a USB 3.0 root hub, but see the correction below |
 | Port | `Port_#0005.Hub_#0004` |
 | `SafeRemovalRequired` | True |
 | `RemovalPolicy` | 3 (removable, surprise removal expected) |
@@ -58,6 +58,12 @@ All four are `DriveType = Fixed`.
 negotiates **UASP**, not BOT — Windows bound `uaspstor`, not `USBSTOR`. That is
 the good outcome. Negotiated USB link speed not yet read; the wizard health
 readout is the next place to look for it (Phase 2).
+
+**Corrected in Phase 3.** `ROOT_HUB30` names a USB 3.0-style root hub, and I
+read it as proof of a USB 3 link. It is not. Walking one level further up,
+that hub hangs off an `AMD USB 2.0 eXtensible Host Controller`, so the link
+negotiated at **480 Mbps**. The hub's name says what the driver stack is, not
+what the cable got. Always walk to the host controller.
 
 ---
 
@@ -600,6 +606,133 @@ Not implemented — it is a feature. Say if you want it and it is a small job.
 
 ---
 
+## Phase 3 — format and copy (attempted by the user, incomplete)
+
+You ran the wizard against **God of War - Ragnarok** while I was not driving it,
+so this is a post-mortem of what the disk shows rather than a watched run.
+
+### What the wizard did
+
+| | |
+|---|---|
+| Source | `B:\Games\God of War - Ragnarok` — 6,451 files, **159.34 GB** |
+| Chosen via | the folder picker built in `65236fa` (this game is in no launcher) |
+| Target | **D:**, JMicron JMS583, 238.47 GB |
+| Format | exFAT, volume label **`God of War`** — the wizard formatted and labelled it |
+| Layout | `D:\Games\God of War - Ragnarok\...` — matches `copy_portable_game` |
+| Copy started | 22:44:43 |
+| Copy stopped | 22:48:00 |
+| Copied | 2,098 files, **3.48 GB** of 159.34 GB — **2.2%** |
+
+So the format step **PASSED**: the drive came back exFAT, correctly labelled,
+and the copy wrote into `Games/<safe folder name>` exactly where the code says
+it should.
+
+The copy **FAILED**, in two distinct ways.
+
+### Finding 1 — the copy died mid-file and left the wreckage behind
+
+The last file written is truncated:
+
+```
+B:\Games\God of War - Ragnarok\exec\sound\pc_le_svartalfheim1a_svaxpl.0.audiopack   819,490,938 bytes
+D:\Games\God of War - Ragnarok\exec\sound\pc_le_svartalfheim1a_svaxpl.0.audiopack   678,428,672 bytes
+```
+
+A returned error would have unwound out of `copy_and_digest` after a complete
+`write_all`; a truncated file means the process stopped between chunks. Nothing
+appears in the Windows Application event log for that minute, and a
+`pc-gamepak.exe` was started fresh at 22:50:08 — consistent with the window
+being closed or killed at 22:48.
+
+Either way the cartridge is now holding 3.48 GB of a game that is not there,
+including one file that is the right name and the wrong length. There is no
+`cartridge.conf`, because that is written after the copy returns. **Nothing
+cleans this up**, and nothing on a later run would notice: a re-copy would
+overwrite file by file, and any file the second run did not reach would survive
+as garbage. CRC verification would catch the truncated file, but only for files
+the manifest lists.
+
+Not fixed yet — see the question at the end, because the right answer depends on
+whether the copy should be resumable.
+
+### Finding 2 — the cartridge is plugged into a USB 2.0 port
+
+This is the real number the brief asked for, and it is bad.
+
+| Measurement | Result |
+|---|---|
+| Wizard copy, B: to D: | 3.478 GB in 197 s = **18.1 MB/s** |
+| Windows `Copy-Item`, same file, B: to D: | **31.3 MB/s** |
+| USB negotiated link | **480 Mbps (USB 2.0)** |
+
+The device tree says it plainly:
+
+```
+USB\VID_152D&PID_A583\MSFT30DD56419883914   (JMS583, UAS)
+  parent: USB\ROOT_HUB30&239a9e6d&0&0
+  parent: AMD USB 2.0 eXtensible Host Controller - 1.20   <-- here
+```
+
+AMD chipsets expose a separate USB 2.0 xHCI controller, and the enclosure is on
+it. 480 Mbps caps out around 35 MB/s in practice, which is exactly the 31.3 MB/s
+Windows itself achieved. UASP is negotiated — that part is fine — but UASP over
+USB 2.0 buys nothing.
+
+**At this speed the copy would have taken 1 hour 25 minutes**, and the whole
+point of the project (a game that loads from the cartridge as fast as from the
+internal disk) cannot be tested from this port.
+
+This host has four faster controllers available:
+
+```
+AMD USB 3.10 eXtensible Host Controller  (x2)
+AMD USB 3.20 eXtensible Host Controller
+ASMedia USB 3.20 eXtensible Host Controller
+```
+
+**Action for you: move the enclosure to a different physical port** — a blue or
+teal one, or the rear USB-C — and I will re-measure before we retry the copy.
+The port is a hardware fact I cannot change from here.
+
+### Finding 3 — our copy runs at 58% of what the port allows
+
+18.1 MB/s against Windows' 31.3 MB/s on the same drives and the same file.
+
+`copy_and_digest` reads 1 MB, CRC32s it a byte at a time through a table, then
+`write_all`s it, strictly serially — the disk is idle while the CRC runs and the
+CRC is idle while the disk runs. It also calls `sync_all()` per file, which on a
+678 MB file forces a full flush before the next file starts.
+
+Worth fixing (overlap the hash with the write, or hash the read buffer while the
+previous chunk is in flight), but **not now**: at 31 MB/s the port is the wall,
+not us. Re-measure on a USB 3 port first, then decide whether this is still
+worth the complexity.
+
+### Open question 8 — what should a failed or abandoned copy leave behind?
+
+The wizard currently leaves a partial game on the cartridge with no record that
+it is partial. Three ways out:
+
+1. **Clean up on failure.** Delete the destination folder if the copy does not
+   complete. Simple, and safe because the folder is one we created — but a
+   1-hour copy that dies at 95% is thrown away entirely.
+2. **Mark it.** Write a marker file at the start of the copy and delete it at the
+   end. Any run that finds the marker knows the folder is incomplete and can
+   offer to resume or to start over. Cheap, and it makes the state legible.
+3. **Resume.** Skip files whose size and CRC already match, re-copy the rest.
+   Most useful on a 159 GB game over a slow link, and the most work.
+
+A hard kill (task manager, power loss) defeats (1) — the process never gets to
+run its cleanup — which is an argument for (2) as the floor whatever else we do.
+
+My recommendation is **(2) now, (3) later**, because (2) is small, survives a
+kill, and is the thing (3) would need anyway.
+
+Your call.
+
+---
+
 ## Phase status
 
 | Phase | Status |
@@ -607,7 +740,7 @@ Not implemented — it is a feature. Say if you want it and it is a small job.
 | 0 — build and unit tests | **PASS** — 172 tests, clippy clean, both binaries built (1 bug found and fixed) |
 | 1 — prepare the NVMe | **PASS** — external USB enclosure, D:, UASP; needed a replug (former Open issue 2) |
 | 2 — wizard, non-destructive | **PARTIAL** — window, Steam list and drive list pass; Playnite bug fixed; no health readout in the wizard |
-| 3 — format and copy | Not started |
+| 3 — format and copy | **FAIL** — format passed; copy died at 2.2% and the cartridge is on a USB 2.0 port (18.1 MB/s) |
 | 4 — cartridge contents | Not started |
 | 5 — insert detection, Play, Eject | Not started |
 | 6 — rewrite with Steam running | Not started |
