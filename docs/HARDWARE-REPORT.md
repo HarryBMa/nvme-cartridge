@@ -211,6 +211,7 @@ prompted, as expected for an unsigned binary; clicked through.
 | Drive list excludes C: | **PASS** |
 | Drive list excludes other fixed disks | **FAIL by design** — see Open question 5 |
 | Health readout: link speed, UASP vs BOT | **FAIL — not present in the wizard at all** |
+| Single-game cartridge via the `+` button | **FAIL** — bug found and fixed, below |
 | Search / artwork | Partial — see below |
 | Nothing written | **PASS** — Write not pressed |
 
@@ -267,6 +268,33 @@ Tauri backend, and the release binary and both installers rebuilt.
 now say so in as many words. Install any JSON library exporter extension in
 Playnite and re-run to see real Playnite games listed — untested, because there
 is no export on this machine to test against.
+
+### Bug found and fixed: adding one game leaves the wizard with no way forward
+
+Reported as *"I can only make a cartridge with >1 games?"* — near enough. One
+game is genuinely a dead end, and this is why.
+
+Each row in the game list has a `+` that adds the game to the bundle. Bundle
+mode starts at **two** games (`create.js:446`), which is the right threshold: one
+game is not a collection and should not be asked for a collection title and
+cover. But `toggleBundleGame` only ever wrote to `bundleGames`; it never set
+`selectedGame`, which is what `intent()` reads.
+
+So with exactly one game added:
+
+- the bundle panel lists it,
+- the row is drawn as selected (`aria-selected` counts bundle membership),
+- `isBundleMode()` is false, so the collection branch does not run,
+- `selectedGame` is null, so `intent()` returns null,
+- **Write is disabled, and nothing on screen says why.**
+
+Clicking the row instead of the `+` works, which is why this is easy to miss:
+the two controls sit on the same row and only one of them leads anywhere.
+
+Fix in commit `8f7a367`: when the bundle holds exactly one game, that game
+becomes the selection, so one `+` makes a single-game cartridge and a second
+hands over to the collection UI. Removing a game leaves the selection alone — a
+game picked by clicking its row was never the bundle's to unpick.
 
 ### Bug: there is no health readout in the wizard
 
