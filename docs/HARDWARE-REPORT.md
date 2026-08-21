@@ -197,6 +197,110 @@ defects.
 
 ---
 
+## Phase 2 — the wizard, nothing destructive — **PARTIAL**
+
+Run: `tauri-ui\src-tauri\target\release\pc-gamepak.exe --create`. SmartScreen
+prompted, as expected for an unsigned binary; clicked through.
+
+| Check | Result |
+|---|---|
+| Window opens | **PASS** |
+| Steam games listed | **PASS** |
+| Playnite games listed | **FAIL** — bug found and fixed, below |
+| Drive list shows the cartridge | **PASS** — `External (D:)` present |
+| Drive list excludes C: | **PASS** |
+| Drive list excludes other fixed disks | **FAIL by design** — see Open question 5 |
+| Health readout: link speed, UASP vs BOT | **FAIL — not present in the wizard at all** |
+| Search / artwork | Partial — see below |
+| Nothing written | **PASS** — Write not pressed |
+
+### Bug found and fixed: Playnite games never appear, and nothing says why
+
+Reported from the running wizard as *"only steam games are listed, no other"*.
+Playnite is installed on this host (`%APPDATA%\Playnite`, `%LOCALAPPDATA%\Playnite`),
+so this was not an absent-library case. Two faults compounding:
+
+**1. Every extension's `config.json` counted as a library export.**
+`playnite::find_exports` took every `.json` one level inside `ExtensionsData/*`.
+Playnite keeps each installed extension's settings in `config.json`, so on this
+host that scan returned seven files, all settings, none an export:
+
+```
+ExtensionsData/00000002-…/config.json
+ExtensionsData/85dd7072-…/config.json
+ExtensionsData/aebe8b7c-…/config.json
+ExtensionsData/c2f038e5-…/config.json
+ExtensionsData/cb91dfc9-…/config.json
+ExtensionsData/cb91dfc9-…/tagnames-swedish.json
+ExtensionsData/e3c26a3d-…/config.json
+```
+
+Because that list was not empty, the branch that says *"Playnite is installed at
+… but has no JSON library export. Install a JSON library exporter extension and
+run it."* could never run. Instead the code took the newest candidate and tried
+to parse it as a library, which failed against an unrelated settings file.
+
+Worth being clear that needing an exporter extension is **correct and
+documented**: Playnite keeps its library in `games.db`, a LiteDB file with no
+usable Rust reader, so a JSON export is the only way in. This host has no
+exporter installed. The bug was never about that — it was that the wizard could
+not say so.
+
+**2. The reason was discarded even when it was correct.** `create::list_games`
+collected a problem per library and then dropped the whole list whenever any
+games were found. Steam almost always answers, so the Playnite failure never
+reached the window under any circumstances.
+
+Fixes, in commit `63c986c`:
+
+- `config.json` is no longer a candidate export.
+- New `playnite::import_newest_in` tries the remaining candidates newest-first
+  until one parses, so a tag list or cache written after a real export cannot
+  hide it. `NotFound` when none parse, which is what the user needs told.
+- `list_games` returns `GameList { games, problems }`. The wizard shows the
+  problems and opens the manual Playnite path field.
+
+Three tests added; core is 152 passed, 0 failed. Clippy clean on core and on the
+Tauri backend, and the release binary and both installers rebuilt.
+
+**Still to confirm on this host:** with no exporter installed, the wizard should
+now say so in as many words. Install any JSON library exporter extension in
+Playnite and re-run to see real Playnite games listed — untested, because there
+is no export on this machine to test against.
+
+### Bug: there is no health readout in the wizard
+
+`cartridge_health` is registered as a command and implemented, but it is invoked
+only from `tauri-ui/app/src/main.js:215` — the **launcher**. The string
+`cartridge_health` does not appear in `create.js` at all.
+
+So the Phase 2 expectation of a health readout showing negotiated link speed and
+UASP vs BOT while choosing a drive cannot be met: the wizard has never had one.
+The information exists and the launcher shows it, but only once a cartridge has
+been made and inserted.
+
+Not fixed. Adding a health panel to the drive step is a feature, not a
+correction, and it wants a design decision about when to run it — `health::inspect`
+shells out to PowerShell on Windows, and doing that for every drive in the list
+on every rescan is not free. See Open question 6.
+
+This means the negotiated USB link speed is **still unmeasured**. It should
+appear in the launcher in Phase 5.
+
+### Artwork search needs a key, and says so
+
+SteamGridDB search is off until switched on: `sgdb::api_key_from` refuses unless
+`steamgriddb_enabled` is set and a key is present, and settings default to off.
+So a fresh install has no artwork search, by design, and the dialog reports
+`SteamGridDB unavailable. You can still paste a URL.`
+
+Reported as *"search etc is a bit broken"*. The in-list game search
+(`create.js:178`) is a plain case-insensitive substring match on name and source
+and looks correct by inspection. Which of the two was meant is not yet pinned
+down — **needs one more detail from the tester** before it can be called a bug.
+
+---
+
 ## Open issues
 
 ### Open issue 1 — two Rust installations, and the old one wins on PATH
@@ -313,15 +417,32 @@ Options, none applied:
 Your call. (2) is the cheap one; (3) is the one that would have prevented the
 worst outcome on this host.
 
+### Open question 6 — should the wizard show cartridge health?
+
+Raised by Phase 2. The brief expects the drive step to show negotiated link
+speed and UASP vs BOT. It does not, and never has: `cartridge_health` is wired
+to the launcher only.
+
+The cost is that the wizard cannot warn about the failure this project most
+wants to catch — a cartridge on a BOT bridge, or negotiated at USB 2.0 — at the
+one moment the user could still choose a different enclosure or port. They find
+out after the copy instead.
+
+The cost of adding it is that `health::inspect` shells out to PowerShell on
+Windows. Running it per drive per rescan is too slow; running it once for the
+selected drive, asynchronously, the way the launcher already does, is not.
+
+Not implemented — it is a feature. Say if you want it and it is a small job.
+
 ---
 
 ## Phase status
 
 | Phase | Status |
 |---|---|
-| 0 — build and unit tests | **PASS** — 169 tests, clippy clean, both binaries built (1 bug found and fixed) |
+| 0 — build and unit tests | **PASS** — 172 tests, clippy clean, both binaries built (1 bug found and fixed) |
 | 1 — prepare the NVMe | **PASS** — external USB enclosure, D:, UASP; needed a replug (former Open issue 2) |
-| 2 — wizard, non-destructive | Not started |
+| 2 — wizard, non-destructive | **PARTIAL** — window, Steam list and drive list pass; Playnite bug fixed; no health readout in the wizard |
 | 3 — format and copy | Not started |
 | 4 — cartridge contents | Not started |
 | 5 — insert detection, Play, Eject | Not started |
