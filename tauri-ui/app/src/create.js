@@ -321,6 +321,21 @@ function toggleBundleGame(game) {
   } else {
     bundleGames.set(game.id, game);
   }
+
+  // One game is not a collection, so bundle mode does not start until the
+  // second. Until it does, the single added game has to be the chosen one:
+  // otherwise adding one game leaves the panel showing it, the row marked as
+  // selected, and Write disabled with nothing on screen saying why. Two games
+  // then hand over to the collection UI, which has its own title and cover.
+  const sole = bundleGames.size === 1 ? [...bundleGames.values()][0] : null;
+  if (sole && selectedGame?.id !== sole.id) {
+    // Fires the art lookup and refreshes everything below; the panel is drawn
+    // here first so the two do not race.
+    renderBundlePanel();
+    refreshCollectionPreview();
+    void selectGame(sole);
+    return;
+  }
   renderGames();
   renderBundlePanel();
   refreshOptions();
